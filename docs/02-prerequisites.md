@@ -9,17 +9,16 @@
 | Wire/clips + resistors | SWCLK and SWDIO need **470 Ω – 1 kΩ series resistors** (the mouse's logic rail is ~1.9 V — do not drive it hard). Do **not** power the mouse from the probe: power it from its own USB cable or battery. |
 | A BLE test host | Windows was used (BLE adapter + `bleak`; exact build not recorded). Any BLE-capable OS can pair by hand; the automated rig in [09](09-test-rig.md) is Windows-only. |
 
-### SWD test pads (as documented by the earlier session on this unit)
+### SWD test pads (confirmed correct by the owner of this unit)
 
 | Probe signal | Mouse pad |
 |---|---|
 | SWCLK | **TP17** |
-| SWDIO | **TP9** |
-| GND | **TP13** or **TP10** |
+| SWDIO | **TP15** |
+| GND | **GND** or **USB SHELL** |
 
-These came from the first hardware session (RP2040 probe) and were later reused with the
-ST-Link; verify against your own board revision before soldering. Pads are on the main PCB,
-so the shell has to be opened.
+Verified on this unit with both the RP2040 probe and the ST-Link. Check against your own board
+revision before soldering. The pads are on the main PCB, so the shell has to be opened.
 
 ### Is the chip readable?
 
