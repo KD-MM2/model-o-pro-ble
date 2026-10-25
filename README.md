@@ -63,7 +63,6 @@ tools/
   nvmc_flash.py           SWD flasher through the NVMC (works with ST-Link V2 clones)
   probe.py                non-halting status/memory tool
   fdis.py                 Thumb disassembler + xref finder for the stock app
-  firmware_selfflash.py generate the image for the in-app self-reflasher (no probe)
   erase_page.py         erase one flash page over SWD (only the bond or mode record)
 rig/windows/              BLE test-rig scripts for a Windows host (pair, cursor, battery, buttons)
 stock/ vendor/ build/ backups/   git-ignored working dirs (your files go here)
