@@ -1,0 +1,6 @@
+pyocd>=0.36
+intelhex
+keystone-engine
+capstone
+unicorn
+ziglang==0.13.0
