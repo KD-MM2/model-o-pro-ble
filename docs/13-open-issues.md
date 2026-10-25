@@ -4,9 +4,9 @@ Priority: **P1** affects daily use or trust in the numbers, **P2** worthwhile, *
 
 | # | Pri | Item | Notes / how to close |
 |---|---|---|---|
-| 1 | P1 | Battery life never measured | Use a current meter (PPK2): idle connected, moving, advertising, System OFF. Compare with the stock dongle mode. Only then tune further. |
-| 2 | P1 | 2.4 GHz dongle mode not re-tested after relocation | Switch with DPI+Back+Forward, check cursor/buttons/wheel via the dongle, switch back. Stock radio path is unmodified but unverified by us. |
-| 3 | P1 | BLE tested on one Windows host only | Test Linux (BlueZ), macOS, Android: pairing, reconnect, 8 buttons, wheel/pan, battery, latency. |
+| 1 | P1 (skipped by owner) | Battery life never measured | Use a current meter (PPK2): idle connected, moving, advertising, System OFF. Compare with the stock dongle mode. Only then tune further. |
+| 2 | P1 (skipped by owner) | 2.4 GHz dongle mode not re-tested after relocation | Switch with DPI+Back+Forward, check cursor/buttons/wheel via the dongle, switch back. Stock radio path is unmodified but unverified by us. |
+| 3 | P1 (skipped by owner) | BLE tested on one Windows host only | Test Linux (BlueZ), macOS, Android: pairing, reconnect, 8 buttons, wheel/pan, battery, latency. |
 | 4 | P2 | Stock 1 kHz TIMER1 tick keeps HFINT on when idle | Gate carefully; stock sleep depends on it (idle counter 0x20003048, handler orig 0x18BA4). |
 | 5 | P2 | LED PWM runs with LED off | Stop PWM0 when dark. |
 | 6 | P2 | Idle sleep fixed at stock 420 s | Expose as setting (u16 @0x200038CB) via CORE or a BLE/vendor command. |
