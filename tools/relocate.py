@@ -68,6 +68,7 @@ img = bytes(g[:BLOB - B]) + bytes(packed)
 newend = NEW + len(img)
 # entry0 src stays BLOB+D; entry1 src (bss, unused) -> new end
 struct.pack_into('<I', img := bytearray(img), 0x1c720 - B, newend)
+import os; os.makedirs(os.path.dirname(OUT) or '.', exist_ok=True)
 open(OUT, 'wb').write(img)
 json.dump({'patched': len(patch), 'excluded': [(hex(a), hex(v), w) for a, v, w in excl], 'newend': hex(newend)}, open(OUT + '.json', 'w'), indent=1)
 print('patched', len(patch), 'excluded', len(excl), 'size', len(img), 'end', hex(newend))

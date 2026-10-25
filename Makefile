@@ -1,5 +1,6 @@
 # Run from the repository root.  `make help` lists the targets.
 PY      ?= python
+$(shell mkdir -p build backups stock vendor)
 HEX      = build/s140_730_golden27000_ble.hex
 ATTR_TAB ?= 720
 
