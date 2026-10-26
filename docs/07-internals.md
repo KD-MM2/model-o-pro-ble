@@ -41,6 +41,7 @@ Address convention: **"orig"** = address in the stock image (base 0x6000). **"re
 | 0x2000B000–0x2000B1FF | app_sched queue buffers (header/data) |
 | 0x2000B400–0x2000D3FF | blehid state `S` and bss (`ENTRY[3]` = `&S`) |
 | 0x2003F000–0x2003F03F | **stub log** (see §6) |
+| 0x2003F0E0–0x2003F0EB | battery hand-off record: magic `BA770001`, last published level, `~level` (survives soft resets) |
 | 0x2003F100– | **blehid log** `LOG[]` (see §6) |
 
 ## 2. Relocation

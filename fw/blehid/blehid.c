@@ -71,6 +71,19 @@ static state_t S;
 static void sys_reset(void);
 uint32_t blehid_send(const uint8_t *rep);
 #define RTC1_COUNTER (*(volatile uint32_t *)0x40011504)   // 32768 Hz, free running (app timer base)
+// Battery level hand-off. The stock battery code resets its percentage to 100 on every charger-state change and at boot, then slews it
+// down to the real level (~25 s). Publishing that transient made hosts show wrong values (e.g. 50 % while the real level was 36 %).
+// So: publish only after the stock value has been stable for BAT_STABLE_TICKS, and remember the last published value in RAM (kept
+// across soft resets: WDT, mode switch, reflash) so a reset does not re-announce the startup 100.
+#define BAT_KEEP ((volatile uint32_t *)0x2003F0E0)   // [0] magic, [1] level, [2] ~level
+#define BAT_MAGIC 0xBA770001u
+#define BAT_STABLE_TICKS (30u * 32768u)
+static uint8_t bat_restore(void) {
+    if (BAT_KEEP[0] == BAT_MAGIC && (BAT_KEEP[1] ^ BAT_KEEP[2]) == 0xFFFFFFFFu && BAT_KEEP[1] <= 100) return (uint8_t)BAT_KEEP[1];
+    uint8_t v = *(volatile uint8_t *)0x20003076;
+    return v > 100 ? 100 : v;
+}
+static void bat_keep(uint8_t v) { BAT_KEEP[1] = v; BAT_KEEP[2] = ~(uint32_t)v; BAT_KEEP[0] = BAT_MAGIC; }
 static void wait_ms(uint32_t ms) { uint32_t t0 = RTC1_COUNTER; while (((RTC1_COUNTER - t0) & 0xFFFFFF) < ms * 33) {} }
 
 // All-zero report: releases every button on the host. Windows keeps the last HID state of a BLE device that vanishes,
@@ -347,7 +360,7 @@ uint32_t blehid_init(void) {
     S.conn = BLE_CONN_HANDLE_INVALID;
     memcpy(S.map, report_map_rom, sizeof S.map);
     S.proto = 1;
-    S.bat = 100;
+    S.bat = bat_restore();   // last published level (survives soft resets); else the stock byte, which starts at 100 and settles within ~30 s
     S.info[0] = 0x11; S.info[1] = 0x01; S.info[2] = 0; S.info[3] = 0x02;   // bcdHID 1.11, country 0, flags: normally connectable
     S.rep_ref[0] = 1; S.rep_ref[1] = 1;                                    // Report ID 1, Input
 
@@ -593,8 +606,8 @@ void blehid_tick(void) {
     if (v > 100) v = 100;
     if (!v || v == S.bat) S.bat_cand = 0;
     else if (v != S.bat_cand) { S.bat_cand = v; S.bat_t0 = RTC1_COUNTER; }          // new candidate: start the stability timer
-    else if (((RTC1_COUNTER - S.bat_t0) & 0xFFFFFF) > 98304) {                        // stable for ~3 s (boot/LED/radio load transients ignored)
-        S.bat = v; S.bat_cand = 0;
+    else if (((RTC1_COUNTER - S.bat_t0) & 0xFFFFFF) > BAT_STABLE_TICKS) {             // stable for 30 s (the stock startup/charger transient is ignored)
+        S.bat = v; S.bat_cand = 0; bat_keep(v);
         if (S.conn != BLE_CONN_HANDLE_INVALID) {
             uint16_t len = 1;
             ble_gatts_hvx_params_t hp;

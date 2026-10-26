@@ -79,8 +79,13 @@ pair <MAC>; trust <MAC>; connect <MAC>
 The stock battery code (ADC → lookup table → percent, orig 0xE088 → byte `0x20003076`) is reused
 as is. BLE exposes it through the standard **Battery Service (0x180F / 0x2A19)**, with notify.
 
-* The value is **noisy for the first seconds after boot**; the module only publishes a value
-  that has been stable for 3 s.
+* **Startup transient:** the stock code resets its percentage to 100 on every boot and every charger-state change (USB plug/unplug), then
+  slews it down to the measured level within ~25 s. BLE publishes a new level only after the stock value has been **stable for 30 s**, and the
+  last published level is **kept in RAM across soft resets** (watchdog, mode switch, reflash), so a reset does not re-announce 100.
+  A cold start (battery just inserted, or wake from System OFF with RAM lost) shows the stock value until the first stable one, so hosts can
+  see 100 for up to about a minute.
+* **Accuracy:** it is the stock ADC measurement. It settled at 36 % on one boot and 43 % on the next with the same battery (charger/load
+  conditions differ), so treat it as ±~7 points.
 * Windows: Settings → Bluetooth & devices shows the percentage; on Linux `upower -d`.
 * Scripted read: [09-test-rig](09-test-rig.md) `ble_battery.py`.
 
