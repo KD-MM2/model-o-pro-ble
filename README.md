@@ -49,6 +49,7 @@ docs/
   11-history-and-next.md  how we got here, what is unverified, ideas for later
   12-usb-update-plan.md   proposal: update over USB with a copier bootloader (not started)
   13-open-issues.md       prioritised list of open tasks for the app image
+  14-regression-checklist.md  static audit + on-hardware regression runs for rare stock paths
   appendix/               raw worklog and the SoftDevice bring-up report
 fw/blehid/blehid.c        the BLE HID module (C, the only new "logic")
 fw/blehid/link.ld         linker script (code at 0x40000, RAM at 0x2000B400)

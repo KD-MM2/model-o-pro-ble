@@ -61,3 +61,16 @@ changes, no `FAULT`, no unexpected `REBOOT`, and the settings surviving a power 
 
 Not covered by run 1: USB plug/unplug (verified earlier in the session: `258a:2015` enumerates, direct-USB
 flag set), a full 90 s idle, and the Glorious CORE checklist (macros, remaps, polling rate, LED effects).
+
+### Run 2 — 2026-10-27, USB attached to a Windows PC with Glorious CORE (`watch.py`, 420 s)
+
+* USB stayed attached for the whole run (`usb=1`, vendor mode var 0); the BLE link stayed up in the background.
+* Two device writes from CORE were visible: both vendor settings pages (0x8B000, 0x8C000) rewritten at ≈134 s,
+  the first page again at ≈197 s. **No fault, no reboot** in the log.
+* The owner ran the CORE list (DPI stage, LED effect/colour, button remap, macro record + run, polling rate,
+  profile save/switch, replug, close/reopen CORE): **no errors, all settings persisted, and the modified
+  settings and features worked.** (The unplug/replug itself was not visible in the monitor log.)
+
+Verdict for open issue 8: the vendor USB configuration channel, settings flash writes, DPI, LED, remap,
+macro and polling-rate paths work after the relocation; the static audit found no missed pointers. Remaining
+unexercised: the stock CLI and the 2.4 GHz link itself (dongle).
