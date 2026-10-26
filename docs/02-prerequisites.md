@@ -79,7 +79,7 @@ programs flash itself through the NVMC registers. CMSIS-DAP probes can use eithe
 ## 4. Safety checklist before any write
 
 - [ ] A full backup exists in `backups/<date>/` **and** a copy lives outside the repo.
-- [ ] `sha256sum -c backups/<date>/SHA256SUMS` passes.
+- [ ] `(cd backups/<date> && sha256sum -c SHA256SUMS)` passes (the sums use bare file names).
 - [ ] The mouse is powered by its own cable/battery, probe wires have series resistors.
 - [ ] No other program (vendor software, another agent, another terminal) is using the probe.
 - [ ] You will **not** use `--erase chip` / `ERASEALL` and will **not** write UICR.

@@ -10,7 +10,7 @@ source .venv/bin/activate
 make backup                      # -> backups/<YYYY-MM-DD-HHMM>/{full_flash_1MB.bin, uicr.bin, SHA256SUMS}
 # or explicitly:
 python tools/dump_flash.py backups/2026-10-26-before-ble
-sha256sum -c backups/2026-10-26-before-ble/SHA256SUMS
+(cd backups/2026-10-26-before-ble && sha256sum -c SHA256SUMS)
 ```
 
 It takes ~17 s with an ST-Link, prints `APPROTECT (UICR 0x10001208) = 0x…` (0xFFFFFFFF = open)

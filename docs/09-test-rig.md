@@ -78,10 +78,10 @@ Reference numbers from the verified run: 1883 reports in 26 s (~72/s), last `hvx
 | `ble_scan.py [name] [secs]` | active scan, prints address/name/RSSI/UUIDs |
 | `ble_pair.py [name]` | find by name, connect, `pair()`, enumerate services/characteristics, read what is readable |
 | `ble_unpair.py [MAC]` | connect (best effort) and `unpair()` |
-| `ble_battery.py [MAC]` | read Battery Level over GATT |
+| `ble_battery.py [MAC]` | read Battery Level over GATT. **Only works while the mouse is advertising**, i.e. not connected to this PC: with the mouse already connected `bleak` reports `BleakDeviceNotFoundError`. Use `battery.ps1` in that case |
 | `cursor.py [secs]` | poll `GetCursorPos`, print each change (counts moves) |
 | `btnwatch.py [secs]` | poll `GetAsyncKeyState` for buttons 1,2,4,5,6 |
-| `battery.ps1 [-Mac …]` | PnP view of the device's properties (battery property key `…104EA319…`) |
+| `battery.ps1 [-Mac …]` | PnP view of the device's properties (battery property key `…104EA319…`, value `2`; `7` = time of last update). Works while connected, runs fine from plain ssh: `powershell -NoProfile -ExecutionPolicy Bypass -File battery.ps1 -Mac <12hex>` |
 
 ## 6. Windows-specific behaviours we met
 

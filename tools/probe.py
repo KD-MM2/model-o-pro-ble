@@ -15,10 +15,10 @@ r32 = t.read32
 cmd = sys.argv[1] if len(sys.argv) > 1 else 'status'
 if cmd == 'status':
     print('SD enabled flag [0x20003830]  =', r32(0x20003830) & 0xFF, ' (1 = BLE mode, 0 = dongle mode)')
-    print('vendor mode var [0x20003003]  =', t.read8(0x20003003), ' (1 = USB/BLE transport, 2 = 2.4G radio)')
+    print('vendor mode var [0x20003003]  =', t.read8(0x20003003), ' (observed: 1 on battery, 0 while USB is attached; 2 = 2.4G radio path)')
     print('CFSR 0x%08x HFSR 0x%08x (both should be 0)' % (r32(0xE000ED28), r32(0xE000ED2C)))
     st = r32(0x4000040C)
-    print('HFCLKSTAT 0x%08x -> HFXO %s' % (st, 'RUNNING' if st & 0x10000 else 'off'))
+    print('HFCLKSTAT 0x%08x -> HFXO %s' % (st, 'RUNNING' if (st & 0x10001) == 0x10001 else 'off (RC oscillator)'))
     print('config page 0xFE000: %s' % [hex(x) for x in t.read_memory_block32(0xFE000, 4)], '(C0DE0001, mode 1=BLE 2=DONGLE, ~mode, generation)')
     print('bond page   0xFD000: magic 0x%08x (B0DD0001 = bonded)' % r32(0xFD000))
     L = 0x2003F100

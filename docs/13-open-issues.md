@@ -15,6 +15,7 @@ Priority: **P1** affects daily use or trust in the numbers, **P2** worthwhile, *
 | 9 | P2 | `--include-sd` NVMC flashing path only dry-run | Verify on a spare/disposable state or a CMSIS-DAP probe; until then document pyocd as the proven first-install route. |
 | 10 | P2 | Rig scripts edited, not re-run | `rig/windows/*` and `winctl.sh` were parametrised after the last live run; re-run pair/cursor/battery/btnwatch. |
 | 11 | P3 | Adv switch 30 s → 500 ms and BAS notify cadence not timed | Capture with a sniffer or btmon. |
+| 18 | P2 | Windows showed battery 50 % while the mouse held 100 % | Seen 2026-10-26 after a reflash: Windows property = 50 (last update 20:43:29), `S.bat` = 100, stock byte = 100. A transient value was probably published after boot and Windows did not refresh. Fix idea: publish only after ~30 s uptime and require a longer stability window; check whether Windows subscribes to the BAS CCCD. |
 | 12 | P3 | `LOG[0x40..0x42]` garbage after a cold power-up | Not cleared on purpose (survive reset); add a magic/valid word. |
 | 13 | P3 | Battery % noisy for first seconds | Already filtered (3 s stability); could seed from a stored last value. |
 | 14 | P3 | Legacy Just Works pairing | LESC / passkey option. |
