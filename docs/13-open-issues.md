@@ -21,6 +21,8 @@ Priority: **P1** affects daily use or trust in the numbers, **P2** worthwhile, *
 | 15 | P3 | Factory-unit APPROTECT state unknown | Document what a locked unit requires (ERASEALL loses the vendor bootloader). |
 | 16 | P3 | BLE settings not reachable from Glorious CORE | Needs new vendor HID commands (shares work with [12](12-usb-update-plan.md)). |
 | 17 | P3 | Two-step test of USB↔BLE hand-over edge cases | Plug/unplug during motion, with a button held, during a mode switch. |
+| 18 | P2 | Exact battery threshold tables never read out | They are built in RAM at init (coarse 11 × u16 @0x2000308C, fine 111 × u16 @0x200030A2); the percent algorithm is decoded in [07](07-internals.md) but the values need one live read: `tools/probe.py mem 0x2000308C 256` + `mem 0x20003074 16`. The flash curve at 0x3DA44..0x3DB46 (codes 606..783 ≈ 3.2→4.1 V) matches the table sizes but has no found xref — verify against the RAM dump before believing it. |
+| 19 | P2 (owner hardware change) | 350 mAh → 650 mAh battery swap | The voltage→percent map is capacity-independent; change nothing unless the new pack is not a standard 4.2 V LiPo (a 4.35 V HV cell breaks the 100 % end, a 3.5 V-min cell gets over-discharged at the 3.2 V 0 % end). Verify charging terminates normally and % tracks a measured pack voltage after the swap. |
 
 Stability checklist before calling the image "release": items 1–3 done, #8 smoke-tested, a final
 tagged backup and `build/…_ble.hex` hash recorded in the README.

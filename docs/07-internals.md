@@ -215,6 +215,22 @@ blehid log `LOG[]` base **0x2003F100** (`uint32_t` indices, byte offset = index 
 | idle timer callback / sleep path | 0xAB44 / 0xAB98 → 0xABC4 | 420 s idle → System OFF |
 | app fault handler | 0x7474 | `bkpt` on SD faults |
 
+### 9.1 Battery voltage → percent map (decoded)
+
+Struct @`0x20003074`: `+0x00` raw %, `+0x02` published % (BAS reads this), `+0x01` `p*2.5625`,
+`+0x06` init flag, `+0x07` rise flag, `+0x08` zero flag, `+0x0A` last raw ADC, `+0x0C` 16-sample
+average, `+0x10/+0x14` stabilization timer.
+
+`0xE088` (per pass): 16-sample SAADC burst (`0xC870`), average → `+0x0C`; then a two-stage
+threshold lookup against **two u16 tables built in RAM at init**: deciles (0,10,…100 %) at
+`0x2000308C` (11 entries) and per-percent thresholds at `0x200030A2` (111 entries).
+`avg < t[0]` → 0 %; `avg ≥ t[10]` → 100 %; else `percent = 10i + j` for the matched window.
+`0xE2C0` smooths raw → published (the 3 s stability filter used by BAS).
+
+The RAM values have never been dumped ([13 #18](13-open-issues.md)). Candidate flash source
+`0x3DA44..0x3DB46`: 60 + 51 ascending u16 (codes 606..783, ≈ 3.2→4.1 V [INFERENCE]) + 11 decile
+values — sizes match the tables exactly, but no code xref was found; treat as unverified.
+
 ## 10. Things the stock code has that this product does not use
 
 Mode-2 paths (SD flash API when mode var == 2, the 0x9084 radio sender, svc 0x33) exist in the
