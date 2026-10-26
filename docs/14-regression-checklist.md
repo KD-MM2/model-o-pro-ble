@@ -41,3 +41,23 @@ dynamic checklist below.
 Change a DPI stage value, change an LED effect and colour, remap a button, record and run a macro,
 change the polling rate, save/switch profiles, then unplug and replug. Expect settings-page hash
 changes, no `FAULT`, no unexpected `REBOOT`, and the settings surviving a power cycle.
+
+## Results
+
+### Run 1 — 2026-10-26, BLE mode, 240 s, cable unplugged (`watch.py`)
+
+* **0 fault events** (CFSR/HFSR stayed 0). No unexpected reboot.
+* **DPI clicks:** the settings page 0x8B000 hash walked through the same 4-state cycle twice
+  (`133464411 → 3857245105 → 308236757 → 2351231033 → 133464411`), i.e. four DPI stages, each click
+  writing the vendor settings page through the SoftDevice flash path, with **no reboot** (the original
+  DPI-click reboot bug stays fixed).
+* **Buttons / wheel / motion:** report buffer showed button bits (left, 0x10, 0x18 = back+forward held),
+  wheel and X/Y deltas as expected.
+* **Mode chord round trip:** BLE → DONGLE at ≈127 s (`sd: 1 → 0`, mode record 1 → 2, RTC reset), DONGLE →
+  BLE at ≈137 s (`sd: 0 → 1`, mode record back to 1, `conn` re-established). The dongle-mode boot path
+  (init_nosd, SoftDevice off) therefore runs and the chord works in both directions.
+* `probe error: STLink error (16): AP wait` lines appear while the stock firmware erases/writes flash:
+  the NVMC stalls the bus, so the probe times out for a moment. Benign.
+
+Not covered by run 1: USB plug/unplug (verified earlier in the session: `258a:2015` enumerates, direct-USB
+flag set), a full 90 s idle, and the Glorious CORE checklist (macros, remaps, polling rate, LED effects).
