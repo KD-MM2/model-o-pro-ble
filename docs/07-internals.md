@@ -17,6 +17,7 @@ Address convention: **"orig"** = address in the stock image (base 0x6000). **"re
 | 0x3F8C0 | MOUSE_T (transport: USB else BLE) | " |
 | 0x3F900 | SYSOFF_T (System OFF via SD) | " |
 | 0x3F940 / 0x3F960 | RADIO_A_T / RADIO_B_T (radio-teardown gates) | " |
+| 0x3F980 / 0x3F9A0 / 0x3F9C0 | RADIO_C_T / RADIO_D_T / RADIO_E_T (radio/timer start gates: 0x15A1C, 0x18AD0, 0x16740) | " |
 | 0x40000–0x412A3 | blehid blob (ENTRY table + code + rodata) | `fw/blehid` |
 | 0x8B000, 0x8C000 | vendor settings pages | stock firmware, **preserved** |
 | 0xFD000 | bond record (magic `B0DD0001`, 64 B) | blehid |
@@ -108,6 +109,10 @@ All sites are asserted (`mk_ble.py` compares the original bytes before writing).
 | 0x14DC8 | `bl 0x15E5C` (USB send) | `bl MOUSE_T` | transport: try USB (returns 1) else `ENTRY[6]` |
 | 0xABA0 | `cmp r0,#1; beq` (`012804d0`) | `bl SYSOFF_T` | idle → System OFF through `sd_power_system_off` (svc 0x33), leaving the link first |
 | 0xABDA, 0xABDE | `bl 0x15B70`, `bl 0x18B24` | `bl RADIO_A_T/B_T` | sleep prep tears down the 2.4G radio with direct NVIC/RADIO writes → APP_MEMACC fault with SD on; run only when SD off |
+| 0x19B84 | `bl 0x15A1C` (2.4G radio power-up) | `bl RADIO_C_T` | link state machine (module handler orig 0x19ACC, table entry 0x1A930): on USB **removal** it sets the vendor mode var to 1 (BLE transport needs that) and then powers the radio up → APP_MEMACC. Keep the state write, skip the radio call |
+| 0x19B8C | `b.w 0x18AD0` (2.4G TIMER0 setup) | `b.w RADIO_D_T` | same case, tail call; TIMER0 is SD-owned |
+| 0x19B0E | `b.w 0x15B70` (radio teardown) | `b.w RADIO_A_T` | same state machine, other event |
+| 0x14880 | `bl 0x16740` (radio start) | `bl RADIO_E_T` | vendor command 0xA0 (wireless parameters) handler, reachable from CORE |
 | 0xBE88 | `bne` (`13d1`) | `nop` | stock flash **erase** takes the direct-NVMC path unless mode==2; force the SD flash API (`sd_flash_page_erase`, svc 0x28) |
 | 0xBEEE | `bne` (`14d1`) | `nop` | same for flash **write** (`sd_flash_write`, svc 0x29) — this fixed "DPI click reboots" |
 
@@ -236,3 +241,7 @@ values — sizes match the tables exactly, but no code xref was found; treat as 
 Mode-2 paths (SD flash API when mode var == 2, the 0x9084 radio sender, svc 0x33) exist in the
 vendor image because it is a generic SDK build; the product never ran with a SoftDevice. We use
 them exactly because they are the vendor's own SD-aware branches.
+
+## 11. Where the SoftDevice-hostile stock code lives (census, 2026-10-27)
+
+40 stock functions load addresses of SD-owned peripherals (RADIO 0x40001000, TIMER0 0x40008000, RTC0, POWER/CLOCK, NVMC, NVIC). The 2.4 GHz link is a large cluster (orig 0x6c00–0x73cc, 0x9548, 0xac8c, 0xb220, 0x15a1c–0x16740, 0x17ae0, 0x1883c–0x18b24). In BLE mode it is never started (GATE_T skips the boot init), and most entry points are protected by the "radio is up" flag at `[0x2000361C+5]`, which stays 0. The unprotected *start* paths found so far are the four gated above. Method that found them: `tools/faultcatch.py` (see [08 §10](08-debugging.md#10-catching-a-real-fault-faultcatchpy)). If a new APP_MEMACC shows up, repeat it, then gate the call site the same way (`radio_gate()` in `mk_ble.py`).

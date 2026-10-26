@@ -18,6 +18,7 @@
 | Crystal always on, battery drains | an old build without the HFXO takeover; or USB attached | rebuild; `make status` should show `HFXO off` on battery |
 | Crash / `bkpt @0x284d4` while debugging | you halted the CPU (SoftDevice assert) | detach, reset, never halt a running SoftDevice (08 rule 1) |
 | `bkpt`/reset right after boot, CFSR 0 | SD fault 0x1001: some code writes POWER/NVMC/RADIO directly | find the offending stock site (orig address in the SD error info), gate it like the other thunks |
+| Mouse stops working after unplugging USB (hard fault, `HFSR 0x40000000`) | stock 2.4G link code touching SD-owned radio/TIMER0 on "USB removed" | fixed by the RADIO_C/D/E gates; if it recurs use `tools/faultcatch.py` ([08 §10](08-debugging.md#10-catching-a-real-fault-faultcatchpy)) |
 | Battery % jumps at boot | stock ADC average needs a few seconds | the module publishes only after 3 s of stability |
 | Mouse stuck "dead" in System OFF with probe attached | emulated System OFF under a debugger | detach the probe, press a button |
 | `hvx` returns `0x3401` | CCCD/sys attributes not set yet | normal before the host enables notifications |

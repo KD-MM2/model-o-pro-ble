@@ -24,6 +24,7 @@ room, and a small (4.7 KB) BLE HID module is hooked into the vendor's own report
 | Force re-pair (new identity) by button chord | works | purple LED blinks, Windows saw a new device |
 | USB priority (cable plugged → USB, else BLE) | works | plug/unplug on Linux and Windows |
 | LED mode feedback (green / blue / purple blinks) | works | observed |
+| USB unplug/replug after using Glorious CORE | works (a hard fault here was found and fixed 2026-10-27, see docs/14) | repeated cycles under a fault trap |
 | Power: HF crystal off when idle, idle slave latency, slow advertising, real System OFF after the stock 7-minute timeout and wake on button | works | register state read over SWD; sleep/wake observed. **Current draw was never measured with a meter** |
 | 2.4 GHz dongle mode | **not re-tested** after the relocation (the stock path is left untouched; the user said it was fine) | — |
 | DPI-button click | works (it used to reboot the mouse; fixed) | — |
@@ -64,7 +65,10 @@ tools/
   mkhex.py                base image: SoftDevice + relocated app (no BLE), for bring-up tests
   mk_ble.py               THE patcher: hooks, thunks, stub, final hex
   nvmc_flash.py           SWD flasher through the NVMC (works with ST-Link V2 clones)
-  probe.py                non-halting status/memory tool
+  probe.py                non-halting status/memory/tuning tool
+  watch.py                non-halting regression monitor (reboots, faults, USB/BLE/settings changes)
+  faultcatch.py           halts on a real fault and prints id/pc/backtrace (find SoftDevice access violations)
+  erase_page.py           erase only the bond or mode page
   fdis.py                 Thumb disassembler + xref finder for the stock app
   erase_page.py         erase one flash page over SWD (only the bond or mode record)
 rig/windows/              BLE test-rig scripts for a Windows host (pair, cursor, battery, buttons)
@@ -98,7 +102,7 @@ Expected result: the build is deterministic. With the stock app
 `sha256 18f8b30a…d165` (v1.00.00, 2022-08-10) and S140 hex `sha256 5f460d35…` the final image is
 
 ```
-build/s140_730_golden27000_ble.hex  sha256 3a869aeb8bd0857151890cd5f1f2a5302f1f4f45d0c401dd4ceb636bdb89e994
+build/s140_730_golden27000_ble.hex  sha256 d52120ccf9a3a79715ffbc104d89daad8246ebeae59626a8605c12837d812175
 ```
 
 (This was verified by rebuilding from a clean checkout in a fresh virtualenv.)

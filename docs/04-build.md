@@ -109,7 +109,7 @@ python tools/mk_ble.py 720
 # stub 266 thunk 16 blob 4772 attr_tab 720 init 0x400b3 poll 0x40b25 send 0x40ab3 state 0x2000b400
 # hex 0x0 0x412a3
 sha256sum build/s140_730_golden27000_ble.hex
-# 3a869aeb8bd0857151890cd5f1f2a5302f1f4f45d0c401dd4ceb636bdb89e994
+# d52120ccf9a3a79715ffbc104d89daad8246ebeae59626a8605c12837d812175
 ```
 
 `720` is the GATT attribute table size passed to `sd_ble_cfg_set` (enough for DIS + BAS +

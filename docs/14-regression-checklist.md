@@ -33,7 +33,7 @@ dynamic checklist below.
 | 3 | Fast wheel scroll both ways, tilt/pan if present | wheel byte changes, no fault |
 | 4 | Lift the mouse and put it down, fast flicks | cursor follows, no fault |
 | 5 | Leave idle 90 s, then move | idle link params, then fast again |
-| 6 | Plug USB (cable to a PC), move, unplug | `usb: 0 -> 1 -> 0`, cursor follows the right transport |
+| 6 | Plug USB (cable to a PC), move, unplug | `usb: 0 -> 1 -> 0`, cursor follows the right transport; run `faultcatch.py` for this one |
 | 7 | Hold DPI+Back+Forward → dongle mode → same chord back | two `REBOOT`s expected (mode switch) |
 
 ## USB/CORE checklist (cable to a PC with Glorious CORE; `watch.py` still running)
@@ -74,3 +74,19 @@ flag set), a full 90 s idle, and the Glorious CORE checklist (macros, remaps, po
 Verdict for open issue 8: the vendor USB configuration channel, settings flash writes, DPI, LED, remap,
 macro and polling-rate paths work after the relocation; the static audit found no missed pointers. Remaining
 unexercised: the stock CLI and the 2.4 GHz link itself (dongle).
+
+### Run 3 — 2026-10-27: unplug after CORE faulted; root-caused and fixed
+
+* `watch.py` showed `usb: 1 → 0`, `mode: 0 → 1` and `HFSR=0x40000000` at the unplug, then repeated settings-page rewrites, and the mouse stopped
+  working (the watchdog reset it later). **This was a real bug in a rare path, found only because of this checklist.**
+* `faultcatch.py` (new) located it: `app_error_fault_handler(id=0x1001 APP_MEMACC)` at orig `0x15A34`, then (after the first gate) at `0x18ADE`.
+  Cause: the stock 2.4G link state machine handles "USB removed" by setting the mode var to 1 and powering the radio/TIMER0 up; the SoftDevice owns both.
+  The boot path and the sleep path were already gated; this one was not (and it only ran when the radio-init flag `[0x2000361D]` was 0).
+* Fix (`mk_ble.py`): gate `bl 0x15A1C` (0x19B84), `b.w 0x18AD0` (0x19B8C), `b.w 0x15B70` (0x19B0E) and, for the CORE wireless-parameter
+  command, `bl 0x16740` (0x14880) so they run only with the SD off. The mode-var write is kept (BLE transport depends on it).
+* Result: owner repeated the CORE → unplug → replug cycle several times (including a quick one and a CORE close/reopen) with the trap armed for 420 s:
+  **no fault**, mouse kept working over BLE after every unplug and over USB after every replug. `watch.py` afterwards: 0 faults, 0 reboots.
+* New image sha256 `d52120ccf9a3a79715ffbc104d89daad8246ebeae59626a8605c12837d812175`; backup `_backups/2026-10-27-ble-stable-v5-radio-gates`.
+
+Lesson: the static audit and a clean CORE session were not enough; the unplug *after* CORE use is a different path. Add "unplug/replug after every
+CORE feature" to the checklist, and keep `faultcatch.py` armed during any new feature test.

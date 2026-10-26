@@ -148,7 +148,7 @@ thunk_asm = f"""
     pop {{r4, pc}}
 """
 thunk = bytes(ks.asm(thunk_asm, THUNK)[0])
-DCDC_T, GATE_T, MOUSE_T, SYSOFF_T, RADIO_A_T, RADIO_B_T = 0x3F840, 0x3F880, 0x3F8C0, 0x3F900, 0x3F940, 0x3F960
+DCDC_T, GATE_T, MOUSE_T, SYSOFF_T, RADIO_A_T, RADIO_B_T, RADIO_C_T, RADIO_D_T, RADIO_E_T = 0x3F840, 0x3F880, 0x3F8C0, 0x3F900, 0x3F940, 0x3F960, 0x3F980, 0x3F9A0, 0x3F9C0
 USB_SEND = 0x15E5C + D
 dcdc_asm = """
     movw r1, #0x3830
@@ -232,7 +232,15 @@ skip:
 """
 radio_a_t = bytes(ks.asm(radio_gate(0x15B70), RADIO_A_T)[0])
 radio_b_t = bytes(ks.asm(radio_gate(0x18B24), RADIO_B_T)[0])
-assert STUB + len(stub) < THUNK and THUNK + len(thunk) < DCDC_T and DCDC_T + len(dcdc_t) < GATE_T and GATE_T + len(gate_t) < MOUSE_T and MOUSE_T + len(mouse_t) < SYSOFF_T and SYSOFF_T + len(sysoff_t) < RADIO_A_T and RADIO_A_T + len(radio_a_t) < RADIO_B_T and RADIO_B_T + len(radio_b_t) < BLOB, (len(stub), len(thunk))
+# stock 2.4G link state machine (module handler, orig 0x19ACC, registered in the table at 0x1A930): on USB removal it sets the
+# vendor mode var to 1 (needed: BLE transport depends on it) and then powers the radio up (orig 0x15A1C writes RADIO.POWER etc.),
+# which the SD refuses (APP_MEMACC 0x1001, found with tools/faultcatch.py). Keep the state update, skip the radio calls with the SD on.
+radio_c_t = bytes(ks.asm(radio_gate(0x15A1C), RADIO_C_T)[0])
+# the same state-machine case then tail-calls the 2.4G timer setup (orig 0x18AD0, TIMER0 = SD-owned); the boot path calls it too (skipped by GATE_T)
+radio_d_t = bytes(ks.asm(radio_gate(0x18AD0), RADIO_D_T)[0])
+# vendor command 0xA0 handler (orig 0x14828, wireless parameters): calls the radio start function 0x16740 (RADIO.POWER cycle)
+radio_e_t = bytes(ks.asm(radio_gate(0x16740), RADIO_E_T)[0])
+assert STUB + len(stub) < THUNK and THUNK + len(thunk) < DCDC_T and DCDC_T + len(dcdc_t) < GATE_T and GATE_T + len(gate_t) < MOUSE_T and MOUSE_T + len(mouse_t) < SYSOFF_T and SYSOFF_T + len(sysoff_t) < RADIO_A_T and RADIO_A_T + len(radio_a_t) < RADIO_B_T and RADIO_B_T + len(radio_b_t) < RADIO_C_T and RADIO_C_T + len(radio_c_t) < RADIO_D_T and RADIO_D_T + len(radio_d_t) < RADIO_E_T and RADIO_E_T + len(radio_e_t) < BLOB, (len(stub), len(thunk))
 
 app = bytearray(open('build/golden_app_27000.bin', 'rb').read())
 import os
@@ -249,6 +257,10 @@ PATCHES = [  # (orig_addr, expected, new)
     (0xABA0, '012804d0', bytes(ks.asm(f'bl #{SYSOFF_T}', 0xABA0 + D)[0]).hex()),   # idle -> System OFF: SD-safe via svc 0x33 (thunk keeps the direct path when the SD is off)
     (0xABDA, bytes(ks.asm(f'bl #{0x15B70 + D}', 0xABDA + D)[0]).hex(), bytes(ks.asm(f'bl #{RADIO_A_T}', 0xABDA + D)[0]).hex()),   # sleep prep: radio teardown only when the SD is off
     (0xABDE, bytes(ks.asm(f'bl #{0x18B24 + D}', 0xABDE + D)[0]).hex(), bytes(ks.asm(f'bl #{RADIO_B_T}', 0xABDE + D)[0]).hex()),
+    (0x19B84, bytes(ks.asm(f'bl #{0x15A1C + D}', 0x19B84 + D)[0]).hex(), bytes(ks.asm(f'bl #{RADIO_C_T}', 0x19B84 + D)[0]).hex()),   # link state machine, USB removed: radio power-up only when the SD is off
+    (0x19B0E, bytes(ks.asm(f'b.w #{0x15B70 + D}', 0x19B0E + D)[0]).hex(), bytes(ks.asm(f'b.w #{RADIO_A_T}', 0x19B0E + D)[0]).hex()),   # same state machine, other event: tail-call to the radio teardown
+    (0x19B8C, bytes(ks.asm(f'b.w #{0x18AD0 + D}', 0x19B8C + D)[0]).hex(), bytes(ks.asm(f'b.w #{RADIO_D_T}', 0x19B8C + D)[0]).hex()),   # same case, tail call to the 2.4G timer setup
+    (0x14880, bytes(ks.asm(f'bl #{0x16740 + D}', 0x14880 + D)[0]).hex(), bytes(ks.asm(f'bl #{RADIO_E_T}', 0x14880 + D)[0]).hex()),   # vendor cmd 0xA0 (wireless params) -> radio start
     (0xBE88, '13d1', '00bf'),   # flash erase: `bne direct-NVMC` (taken unless vendor mode var==2) -> nop: use sd_flash_page_erase whenever the SD is enabled
     (0xBEEE, '14d1', '00bf'),   # flash write: same for sd_flash_write
 ]
@@ -269,6 +281,9 @@ for i, b in enumerate(mouse_t): ih[MOUSE_T + i] = b
 for i, b in enumerate(sysoff_t): ih[SYSOFF_T + i] = b
 for i, b in enumerate(radio_a_t): ih[RADIO_A_T + i] = b
 for i, b in enumerate(radio_b_t): ih[RADIO_B_T + i] = b
+for i, b in enumerate(radio_c_t): ih[RADIO_C_T + i] = b
+for i, b in enumerate(radio_d_t): ih[RADIO_D_T + i] = b
+for i, b in enumerate(radio_e_t): ih[RADIO_E_T + i] = b
 for i, b in enumerate(blob): ih[BLOB + i] = b
 ih.write_hex_file('build/s140_730_golden27000_ble.hex')
 open('build/golden_app_27000_ble.bin', 'wb').write(app)

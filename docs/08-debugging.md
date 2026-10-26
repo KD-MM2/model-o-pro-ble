@@ -174,3 +174,28 @@ faults after a change:
   `S.notify_on=1` in the restore path so the idle policy works after a bonded reconnect.
 * Idle slow-params did "never fire" because `notify_on` was not set on a bonded reconnect.
   Fixed; keep it in mind if you refactor the sys-attr code.
+
+## 10. Catching a real fault: `faultcatch.py`
+
+`watch.py` only tells you *that* something faulted. `faultcatch.py` tells you *where*:
+
+```bash
+python tools/faultcatch.py 420        # arm, then reproduce the problem (e.g. unplug the USB cable)
+```
+
+It sets hardware breakpoints on the app's fault-handler spin loops (the stock NMI/HardFault/MemManage/BusFault/
+UsageFault vectors all point at `b .`) **and** on the `bkpt` inside the app's error handler `app_error_fault_handler(id, pc, info)`
+(orig 0x7474, bkpt at 0x74D4). A real fault is already fatal (the watchdog resets it anyway), so halting there is safe.
+
+How to read the output:
+
+* The handler **keeps its arguments in r7/r6/r5** (`id`, `pc`, `info`); r0–r2 are already scratch at the `bkpt`.
+* `id 0x1001` = `NRF_FAULT_ID_APP_MEMACC`: the app wrote a SoftDevice-owned peripheral or RAM. `pc` is the faulting instruction (may be 1–2
+  instructions late), `info` the protected sub-region. `id 1` = SoftDevice assert (never halt a running SD).
+* Subtract 0x21000 from `pc` to get the stock address, then `python tools/fdis.py <orig> 0x40`.
+* Without a debugger the `bkpt` escalates to HardFault: that is why `watch.py` showed `HFSR=0x40000000` (FORCED) with CFSR 0.
+* The "MSP return-address-like words" list is a cheap backtrace of the faulting thread.
+
+Case study (2026-10-27): unplugging USB after using Glorious CORE → id 0x1001 at orig 0x15A34 (`RADIO.POWER` write in the 2.4G power-up),
+then at orig 0x18ADE (TIMER0 setup), both from the link state machine reacting to "USB removed". Fixed with the gates in
+[07 §4](07-internals.md#4-patch-table); verified with repeated unplug/replug cycles under the trap.
