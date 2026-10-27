@@ -24,7 +24,7 @@
 | `hvx` returns `0x3401` | CCCD/sys attributes not set yet | normal before the host enables notifications |
 | BLE events show `0x10,0x23,0x24,0x14,0x11` repeating | host retries encryption with an old key | remove host-side bond |
 | Chords do nothing | wrong pins on your board or masks overridden by SWD | `probe.py chord …`; check pin table in 07 |
-| Sleep looks "not working" | debugger attached (emulated), or the idle timer is long | detach; the stock idle sleep is 420 s |
+| Sleep looks "not working" | debugger attached (emulated), or the idle timer is long | detach; the idle sleep is `BLE_SLEEP_S` in `blehid.c` (default 420 s) |
 
 ## Hard-won lessons (short form)
 

@@ -78,6 +78,9 @@ uint32_t blehid_send(const uint8_t *rep);
 #define BAT_KEEP ((volatile uint32_t *)0x2003F0E0)   // [0] magic, [1] level, [2] ~level
 #define BAT_MAGIC 0xBA770001u
 #define BAT_STABLE_TICKS (30u * 32768u)
+// Idle time before the stock sleep path runs, in seconds (stock default 420 = 7 min; CORE has no setting for it). The stock idle
+// callback compares its 1 Hz idle counter with the u16 at 0x200038CB.
+#define BLE_SLEEP_S 420u
 static uint8_t bat_restore(void) {
     if (BAT_KEEP[0] == BAT_MAGIC && (BAT_KEEP[1] ^ BAT_KEEP[2]) == 0xFFFFFFFFu && BAT_KEEP[1] <= 100) return (uint8_t)BAT_KEEP[1];
     uint8_t v = *(volatile uint8_t *)0x20003076;
@@ -360,6 +363,7 @@ uint32_t blehid_init(void) {
     S.conn = BLE_CONN_HANDLE_INVALID;
     memcpy(S.map, report_map_rom, sizeof S.map);
     S.proto = 1;
+    *(volatile uint16_t *)0x200038CB = BLE_SLEEP_S;
     S.bat = bat_restore();   // last published level (survives soft resets); else the stock byte, which starts at 100 and settles within ~30 s
     S.info[0] = 0x11; S.info[1] = 0x01; S.info[2] = 0; S.info[3] = 0x02;   // bcdHID 1.11, country 0, flags: normally connectable
     S.rep_ref[0] = 1; S.rep_ref[1] = 1;                                    // Report ID 1, Input
