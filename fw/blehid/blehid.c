@@ -60,7 +60,8 @@ typedef struct {
     uint32_t pair_t0, fl2_addr, fl2_buf[4];
     uint8_t neutral_pending, usb_prev, led_state, led_color, led_blinks;   // release-all report / USB edge / mode LED
     uint16_t led_orig[3];
-    uint32_t led_t0, bat_t0;
+    uint32_t led_t0, bat_t0, pwm_t0;
+    uint8_t pwm_off;
     uint8_t bat_cand;
     uint8_t sa[88];          // GATT system attributes (CCCD state) of the bonded peer
     struct { uint8_t state, tries, err; uint32_t addr, words; uint32_t buf[32]; } fl;   // async flash writer (SD flash API)
@@ -120,6 +121,22 @@ static void led_tick(void) {
     }
     int on = (ms % 500) < 300;
     for (int i = 0; i < 3; i++) LED_SEQ[i] = (on && ((S.led_color >> i) & 1)) ? 0x80C0 : 0x8000;   // ~75% duty
+}
+// The stock driver leaves PWM0 running with all-zero duty (LED dark), which keeps the 16 MHz clock requested. Stop it while the
+// duty buffer is dark (the pins read low either way) and start it again as soon as the stock code writes a non-zero duty.
+#define PWM0_REG(o) (*(volatile uint32_t *)(0x4001C000u + (o)))
+static void led_pwm_gate(void) {
+    uint32_t lit = 0;
+    for (int i = 0; i < 4; i++) lit |= LED_SEQ[i] & 0x7FFF;
+    uint32_t now = RTC1_COUNTER;
+    if (lit) {
+        if (S.pwm_off) { PWM0_REG(0x500) = 1; PWM0_REG(0x008) = 1; S.pwm_off = 0; }   // ENABLE, SEQSTART[0]
+        S.pwm_t0 = now;
+    } else if (!S.pwm_off && ((now - S.pwm_t0) & 0xFFFFFF) > 16384 && !S.led_state && PWM0_REG(0x500)) {   // dark for 500 ms
+        PWM0_REG(0x104) = 0; PWM0_REG(0x004) = 1;                                          // TASKS_STOP
+        for (volatile int n = 0; n < 20000 && !PWM0_REG(0x104); n++) {}
+        PWM0_REG(0x500) = 0; S.pwm_off = 1;
+    }
 }
 // ---- bond persistence: one 64-byte record in its own flash page, written through the SD flash API
 #define BOND_ADDR 0xFD000u
@@ -580,6 +597,7 @@ void blehid_tick(void) {
     chord_poll();
     pair_chord_poll();
     led_tick();
+    led_pwm_gate();
     if (!SD_FLAG) return;          // DONGLE mode: SoftDevice off, nothing else to do
     blehid_poll();
     // USB took over (cable enumerated): release the buttons on the BLE host so nothing stays pressed there

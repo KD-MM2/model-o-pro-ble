@@ -8,7 +8,7 @@ Priority: **P1** affects daily use or trust in the numbers, **P2** worthwhile, *
 | 2 | P1 (skipped by owner) | 2.4 GHz dongle mode not re-tested after relocation | Switch with DPI+Back+Forward, check cursor/buttons/wheel via the dongle, switch back. Stock radio path is unmodified but unverified by us. |
 | 3 | P1 (skipped by owner) | BLE tested on one Windows host only | Test Linux (BlueZ), macOS, Android: pairing, reconnect, 8 buttons, wheel/pan, battery, latency. |
 | 4 | P2 | Stock 1 kHz TIMER1 tick keeps HFINT on when idle | Gate carefully; stock sleep depends on it (idle counter 0x20003048, handler orig 0x18BA4). |
-| 5 | P2 | LED PWM runs with LED off | Stop PWM0 when dark. |
+| 5 | P2 | ~~LED PWM runs with LED off~~ **done** | `led_pwm_gate()` in `blehid.c` stops PWM0 (status LED) after 500 ms of all-zero duty and restarts it when the stock code writes a duty. Verified: ENABLE 1 during the boot blink, 0 afterwards, blink visible. The DPI LED is PWM1 and is left alone. |
 | 6 | P2 | ~~Idle sleep fixed at stock 420 s~~ **done** | CORE has no sleep setting for this mouse (checked). Now a build-time constant `BLE_SLEEP_S` in `blehid.c` written to u16 @0x200038CB at init (verified: 60 → RAM `0x3c`, back to 420). |
 | 7 | P2 | Only one bond stored | Multi-host slots (like the O3's 3 channels): N bond records + chord to select + directed advertising. |
 | 8 | P2 (done 2026-10-27, see 14) | Rare stock paths unverified | ~380 unpatched in-old-range words; CLI, 2.4G link internals, stock firmware-update path (bootloader gone). Smoke-test each; suspect an unrelocated pointer first. |
