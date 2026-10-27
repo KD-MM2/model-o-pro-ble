@@ -10,6 +10,7 @@ room, and a small (4.7 KB) BLE HID module is hooked into the vendor's own report
 > solder/clip to test pads. The vendor bootloader is not recoverable once erased. Read
 > [docs/03-backup-restore.md](docs/03-backup-restore.md) *before* touching anything.
 > Everything here is unofficial and unsupported by Glorious or Nordic. It voids your warranty.
+> Full terms: [DISCLAIMER.md](DISCLAIMER.md).
 
 ## What you get
 
@@ -34,6 +35,7 @@ room, and a small (4.7 KB) BLE HID module is hooked into the vendor's own report
 
 ```
 README.md                 you are here
+DISCLAIMER.md             unofficial project; bricking, warranty and licensing terms — read first
 Makefile                  one-command wrappers: venv, backup, build, dry-run, flash, status
 requirements.txt          Python deps (pyocd, intelhex, keystone, capstone, ziglang…)
 docs/
