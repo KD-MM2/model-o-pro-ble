@@ -105,7 +105,7 @@ Expected result: the build is deterministic. With the stock app
 `sha256 18f8b30a…d165` (v1.00.00, 2022-08-10) and S140 hex `sha256 5f460d35…` the final image is
 
 ```
-build/s140_730_golden27000_ble.hex  sha256 5f594448c9de6e2fe5e10351e0c66f6bfd4ec1c447cc7bd35ff3e89b5053ed64
+build/s140_730_golden27000_ble.hex  sha256 3487146b46cb7d993246b9b8ad4263bdd5de762e891990d886e50b1cd7dd28ee
 ```
 
 (This was verified by rebuilding from a clean checkout in a fresh virtualenv.)

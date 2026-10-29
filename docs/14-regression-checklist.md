@@ -117,5 +117,6 @@ status LED only (PWM0 enabled during the boot blink, disabled afterwards, blink 
 
 * Cause: the stock LED engine is clocked by PWM0's loops-done interrupt for both LEDs ([07 §13](07-internals.md#13-the-stock-led-engine)); with PWM0 stopped the DPI LED state froze.
 * The gate was removed (build `blehid.c` without `led_pwm_gate`); PWM0 and PWM1 are both enabled while awake, the DPI LED shows its colour after boot.
+* New image sha256 `3487146b46cb7d993246b9b8ad4263bdd5de762e891990d886e50b1cd7dd28ee` (blob 8056 B); the Run 4 hash (`5f594448…`) is the image *with* the gate.
 * Awaiting the owner's lift/place check on the fixed image. Lesson: an optimisation that touches a stock peripheral needs a check of **everything** that peripheral serves, and the owner
   noticing a behaviour change is a regression signal; add "lift the mouse, click DPI, watch both LEDs" to the checklist.
