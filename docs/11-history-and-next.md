@@ -38,9 +38,8 @@ HFXO state, idle parameters accepted by Windows, System OFF + wake.
 
 ## Ideas not done
 
-1. **Stop the stock 1 kHz TIMER1 tick when idle.** It keeps HFINT running whenever awake; the
-   stock sleep logic depends on it, so gate it carefully (idle counter at 0x20003048 and the
-   TIMER1 handler at orig 0x18BA4).
+1. ~~Stop the stock 1 kHz TIMER1 tick when idle.~~ **Dropped by the owner as too risky** ([13 #4](13-open-issues.md)): it keeps HFINT running
+   whenever awake, but the stock sleep logic depends on it (idle counter at 0x20003048, TIMER1 handler at orig 0x18BA4).
 2. **LED PWM**: PWM0 keeps running with the LED off; stop it when dark (stock driver
    re-inits it for effects).
 3. **Shorter idle sleep**: the stock threshold is 420 s (u16 @ 0x200038CB); expose as a BLE
