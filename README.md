@@ -4,7 +4,7 @@ Adds **Bluetooth Low Energy** (plus the existing USB cable and 2.4 GHz dongle mo
 Glorious Model O Pro Wireless (Nordic nRF52840) that shipped with a 2.4 GHz-only firmware.
 It does this **by patching the stock firmware binary**, not by rewriting it: Nordic's
 SoftDevice S140 7.3.0 is installed underneath the vendor app, the app is relocated to make
-room, and a small (4.7 KB) BLE HID module is hooked into the vendor's own report pipeline.
+room, and a small (8 KB) BLE HID module is hooked into the vendor's own report pipeline.
 
 > **Risk notice.** This writes to the mouse's flash over SWD. You must open the mouse and
 > solder/clip to test pads. The vendor bootloader is not recoverable once erased. Read
@@ -22,7 +22,8 @@ room, and a small (4.7 KB) BLE HID module is hooked into the vendor's own report
 | Bonding (pair once, reconnects by itself) | works | survives reset and reflash of the app |
 | Battery level over BLE (Battery Service) | works | read from Windows through `ble_battery.py` |
 | Mode switch BLE ⇄ 2.4 GHz dongle by button chord | works (BLE→dongle→BLE round trip) | real buttons, LED feedback seen |
-| Force re-pair (new identity) by button chord | works | purple LED blinks, Windows saw a new device |
+| Wipe all hosts (new identity) by a 10 s button chord | works | purple LED blinks, Windows saw a new device |
+| **Up to 4 hosts**: DPI + Left (3 s) adds one, DPI + Forward/Back (1 s) cycles through the stored ones | works with 2 real hosts (Windows PC + phone), ~2 s per switch | passive trace of the user's own switching, re-pairing keeps the slot; see [06](docs/06-user-guide.md#4-pairing) |
 | USB priority (cable plugged → USB, else BLE) | works | plug/unplug on Linux and Windows |
 | LED mode feedback (green / blue / purple blinks) | works | observed |
 | USB unplug/replug after using Glorious CORE | works (a hard fault here was found and fixed 2026-10-27, see docs/14) | repeated cycles under a fault trap |
@@ -104,7 +105,7 @@ Expected result: the build is deterministic. With the stock app
 `sha256 18f8b30a…d165` (v1.00.00, 2022-08-10) and S140 hex `sha256 5f460d35…` the final image is
 
 ```
-build/s140_730_golden27000_ble.hex  sha256 d52120ccf9a3a79715ffbc104d89daad8246ebeae59626a8605c12837d812175
+build/s140_730_golden27000_ble.hex  sha256 5f594448c9de6e2fe5e10351e0c66f6bfd4ec1c447cc7bd35ff3e89b5053ed64
 ```
 
 (This was verified by rebuilding from a clean checkout in a fresh virtualenv.)

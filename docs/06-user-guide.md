@@ -12,15 +12,18 @@ So "plug into a Linux PC while paired to a Windows PC" moves the Linux cursor, n
 was an explicit design choice. Unplugging returns to BLE. After a mode switch or reboot the
 same rules apply.
 
-## 2. Button chords (hold for 3 seconds)
+## 2. Button chords
 
 | Chord (all held together) | Action | Result |
 |---|---|---|
 | **DPI + Back + Forward** | Toggle **BLE ⇄ 2.4 GHz dongle** mode | Releases buttons on the host, writes the mode record, resets, boots in the other mode |
-| **Left + Right + DPI** | **Force re-pair** | 3 purple blinks → the bond is erased and the BLE address changes → reset → boots in pairing mode (2 purple blinks) |
+| **Left + Right + DPI**, hold **10 s** | **Wipe all hosts** (factory reset of the pairings) | 3 purple blinks → every stored host is erased and the BLE address generation changes → reset → boots in pairing mode (2 purple blinks) |
+| **DPI + Left**, hold **3 s** | **Add a host** (open the pairing window) | 2 purple blinks, then one purple blink every 2 s for 120 s while the mouse is open for pairing; stored hosts are kept |
+| **DPI + Forward** / **DPI + Back**, hold **1 s** | **Next / previous host** | blue blinks = host number (1–4); the link moves to that host 1.5 s after the last press |
 
-The mode chord works in both modes (so you can always get back); the re-pair chord only acts in BLE mode (it needs the SoftDevice). The hold
-time is 98 304 ticks of the 32 768 Hz RTC = exactly 3 s. Releasing early cancels.
+The mode chord (3 s, 98 304 RTC ticks) works in both modes (so you can always get back); the host chords only act in BLE mode (they need the
+SoftDevice). Releasing early cancels. The wipe chord is deliberately long (10 s): it used to be 3 s and fired by accident while trying to
+add a host. While a chord is held the buttons still reach the current host (a Left click, a Forward click, a DPI step).
 
 The chord masks are plain GPIO bitmasks in RAM (`S.chord_p0/p1`), patchable live over SWD
 ([08 §6](08-debugging.md#6-live-tuning-hooks)); the defaults are compiled in
@@ -37,7 +40,9 @@ Uses the stock RGB LED PWM; the module temporarily overlays the three duty value
 | 2 × **purple** at power-up/reset | BLE mode, **no bond** (pairing mode: advertising, ready to pair) |
 | 2 × **green** at power-up/reset | 2.4 GHz **dongle** mode |
 | 1 × **blue** | BLE host connected |
-| 3 × **purple**, then reboot | Force re-pair accepted |
+| 3 × **purple**, then reboot | Wipe-all accepted |
+| *k* × **blue** after DPI + Forward/Back | host *k* selected (it connects within about 1–2 s) |
+| purple blink every 2 s | pairing window open (120 s) |
 | 2 × blue after a long idle | Woke from System OFF (it is a full reboot) |
 
 LED bit mapping in code: bit0 = red, bit1 = green, bit2 = blue (so colour `5` = red+blue =
@@ -46,8 +51,23 @@ purple, `4` = blue, `2` = green).
 ## 4. Pairing
 
 The mouse advertises as **"Model O PRO Wireless"** (HID appearance 0x03C2, Mouse), LE legacy
-pairing, **Just Works** bonding. The bond (LTK, peer identity, CCCD state) is stored in flash
-page 0xFD000, so it survives power cycles **and normal firmware updates**.
+pairing, **Just Works** bonding. Up to **4 hosts** are stored (LTK, peer identity, CCCD state each) in flash
+page 0xFD000, so they survive power cycles **and normal firmware updates**.
+
+### Several hosts (PC, phone, …)
+
+* **First host:** a mouse with no stored host advertises and accepts pairing by itself (2 purple blinks at boot). Pair it as below.
+* **More hosts:** hold **DPI + Left** for 3 s, then add the mouse on the new host within 120 s. The mouse drops the current host and
+  advertises from a fresh address while the window is open, so none of the stored hosts can grab the connection. A host that is already
+  stored gets its own slot back (same identity), otherwise the next free slot is used; with all 4 slots full the **oldest** host is replaced.
+  Pairing is refused outside the window.
+* **Switching:** **DPI + Forward** goes to the next stored host, **DPI + Back** to the previous one, wrapping around, only among the stored
+  hosts (1→2→3→4→1…, with two hosts 1→2→1). Press repeatedly to step further; the link moves 1.5 s after the last press. The selection is
+  remembered across power cycles.
+* **How it works:** every stored host has its **own advertising address**; only the selected host's address is on air, so only that host can
+  connect. Consequences: a scanner that is not a stored host sees extra "Model O PRO Wireless" entries (one per slot and per pairing window,
+  harmless); a host reconnects after a switch within about 1–2 s on Windows and Android in our tests, but the time is the host's own
+  reconnect scan and can be longer.
 
 ### Windows
 
@@ -67,12 +87,12 @@ power on; agent on; default-agent; scan on
 pair <MAC>; trust <MAC>; connect <MAC>
 ```
 
-### Force re-pair (new identity)
+### Wipe all hosts (new identity)
 
-1. Optional but cleaner: remove the mouse from the host's Bluetooth list.
-2. Hold **Left + Right + DPI** for 3 s; see 3 purple blinks, then 2 purple blinks after the reboot.
-3. Pair as above. The mouse now has a new random-static address derived from the "pairing
-   generation" counter (config word 3), so hosts cannot replay the old key.
+1. Optional but cleaner: remove the mouse from every host's Bluetooth list.
+2. Hold **Left + Right + DPI** for **10 s**; see 3 purple blinks, then 2 purple blinks after the reboot.
+3. Pair as above. The mouse now has new random-static addresses derived from the "pairing
+   generation" counter (config word 3), so hosts cannot replay the old keys.
 
 ## 5. Battery level
 

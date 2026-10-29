@@ -90,3 +90,22 @@ unexercised: the stock CLI and the 2.4 GHz link itself (dongle).
 
 Lesson: the static audit and a clean CORE session were not enough; the unplug *after* CORE use is a different path. Add "unplug/replug after every
 CORE feature" to the checklist, and keep `faultcatch.py` armed during any new feature test.
+
+### Run 4 — 2026-10-29, multi-host (item 7), two real hosts (Windows PC + phone)
+
+What was exercised on hardware: pairing the first host, adding a second through DPI + Left, switching with DPI + Forward/Back, re-pairing
+an already stored host, mixed with the user pressing the chords by hand.
+
+* **Fault trap:** `faultcatch.py` armed for 10 min during switching: no fault. `CFSR/HFSR` stayed 0 in every status read.
+* **Cycle order** (SWD hook with fabricated bonds, 4/3/2/1 configured hosts): Forward 1→2→3→4→1…, Back 4→3→2→1→4…, with two hosts 1→2→1→2, with one host no change.
+* **Two real hosts:** every switch ended connected to the right host (`SEC_INFO_REQUEST` matched the expected slot) **1.6–2.8 s after the press**
+  (1.5 s of that is the debounce). Passive trace of the user's own switching: 11 target changes, every one caused by a physical DPI + Forward.
+* **Re-adding an already stored host** kept the slot count at 2 (same-identity replacement).
+* **Real bugs found and fixed on the way** (each only visible in a test with real hosts):
+  1. *Wipe chord fired by accident* (3 s Left + Right + DPI while trying DPI + Left): generation 4 → 13 in one session, all hosts erased each time. Now 10 s.
+  2. *Open pairing window let the old host take the connection back within 0.3 s* (all hosts shared one address). Now one address per host.
+  3. *Nonce read from the flash page while it was being rewritten* → wrong advertising address for 60 s after a switch (reconnect after 63–66 s,
+     once "never"). Now everything reads a RAM mirror; verified with `sd_ble_gap_adv_addr_get` = expected address on every switch.
+  4. *New slot loaded while the old host was still connected* (a late CCCD write could have been saved into the wrong slot). Now loaded after the disconnect.
+* **Not verified:** pairing refusal outside the window, a third/fourth real host, Linux/macOS hosts, power draw while advertising 30 ms for 60 s after a switch.
+* New image sha256 `5f594448c9de6e2fe5e10351e0c66f6bfd4ec1c447cc7bd35ff3e89b5053ed64` (blob 8256 B).

@@ -20,7 +20,7 @@ Address convention: **"orig"** = address in the stock image (base 0x6000). **"re
 | 0x3F980 / 0x3F9A0 / 0x3F9C0 | RADIO_C_T / RADIO_D_T / RADIO_E_T (radio/timer start gates: 0x15A1C, 0x18AD0, 0x16740) | " |
 | 0x40000–0x412A3 | blehid blob (ENTRY table + code + rodata) | `fw/blehid` |
 | 0x8B000, 0x8C000 | vendor settings pages | stock firmware, **preserved** |
-| 0xFD000 | bond record (magic `B0DD0001`, 64 B) | blehid |
+| 0xFD000 | bond area: 4 host slots × 256 B (see §12) | blehid |
 | 0xFE000 | mode record `{C0DE0001, mode, ~mode, generation}` | blehid |
 
 | RAM | Content |
@@ -188,7 +188,7 @@ blehid log `LOG[]` base **0x2003F100** (`uint32_t` indices, byte offset = index 
 | Advertising | connectable scannable undirected; flags + appearance + HID UUID in adv data, name in scan response; 50 ms ×30 s then 500 ms |
 | Services | DIS (PnP ID with VID 0x258A, PID 0x2015), BAS (0x2A19, read+notify), HID (0x1812) |
 | HID | HID Information, **Report Map** (mouse, Report ID 1, 8 buttons, X/Y int16, wheel int8, AC Pan int8), Control Point, Protocol Mode, Report (input, notify) + Report Reference |
-| Security | SMP LE legacy, Just Works, bonding; keys stored in page 0xFD000, restored on reconnect via `sd_ble_gatts_sys_attr_set` |
+| Security | SMP LE legacy, Just Works, bonding; up to 4 hosts stored in page 0xFD000 (§12), restored on reconnect via `sd_ble_gatts_sys_attr_set` |
 | Connection | preferred 7.5 ms/lat 0 (host usually ignores PPCP: the mouse sends an explicit update request); idle 15 ms/lat 20 |
 | Address | random static, derived from the pairing generation (`sd_ble_gap_addr_set` when generation ≠ 0) |
 
@@ -246,3 +246,54 @@ them exactly because they are the vendor's own SD-aware branches.
 ## 11. Where the SoftDevice-hostile stock code lives (census, 2026-10-27)
 
 40 stock functions load addresses of SD-owned peripherals (RADIO 0x40001000, TIMER0 0x40008000, RTC0, POWER/CLOCK, NVMC, NVIC). The 2.4 GHz link is a large cluster (orig 0x6c00–0x73cc, 0x9548, 0xac8c, 0xb220, 0x15a1c–0x16740, 0x17ae0, 0x1883c–0x18b24). In BLE mode it is never started (GATE_T skips the boot init), and most entry points are protected by the "radio is up" flag at `[0x2000361C+5]`, which stays 0. The unprotected *start* paths found so far are the four gated above. Method that found them: `tools/faultcatch.py` (see [08 §10](08-debugging.md#10-catching-a-real-fault-faultcatchpy)). If a new APP_MEMACC shows up, repeat it, then gate the call site the same way (`radio_gate()` in `mk_ble.py`).
+
+## 12. Multiple hosts (item 7, 2026-10-29)
+
+**Bond area** (page 0xFD000, written as a whole through the SD flash API; only the first 1 KB is used). Slot *i* at `0xFD000 + 256·i`:
+
+| words | content |
+|---|---|
+| 0 | magic `B0DD0001` |
+| 1 | `rec_sum(words 2..31)` |
+| 2..8 | own encryption key (28 B: LTK, ediv, rand) |
+| 9 | `sa_len` (low 16) \| pairing/last-used sequence number (high 16) |
+| 10..31 | GATT system attributes (CCCD state, 88 B) |
+| 32 | `ID_MAGIC 0x1D1D0002` |
+| 33 | `rec_sum(words 34..41)` |
+| 34..39 | peer identity (`ble_gap_id_key_t`: IRK + address, 23 B) |
+| 40 | **address nonce** |
+| 41 | identity valid |
+
+Words 0..31 are the older single-bond record, so a bond made by an older build stays valid as slot 0 (nonce 0, no identity).
+
+**One address per host.** The advertising address is a static random address derived from FICR, the pairing generation (config word 3) and
+the slot's nonce: `lo = FICR[0xA4] ^ gen·0x9E3779B1 ^ nonce·0x85EBCA6B`. Only the selected slot's address is advertised, so only that host
+can connect (no whitelist or IRK handling needed; hosts that use private addresses are not a problem because the *mouse* is the one with the
+fixed address). A pairing window advertises with the next unused nonce, which is the nonce the new slot then stores.
+`sd_ble_gap_addr_set` must run while not advertising (`adv_addr()` is called from `adv_restart`, after `sd_ble_gap_adv_stop`).
+
+**RAM mirror (`S.img`, 1 KB).** Every decision (slot validity, sequence numbers, nonces, encryption-key lookup at connect time) reads the RAM
+copy, never the flash page. Saving updates the mirror immediately and the whole page is then rewritten asynchronously from it. This replaced
+a version that read the nonce from flash: during the page rewrite the record is unreadable for tens of ms, `adv_addr()` fell back to nonce 0
+and the mouse advertised an address no host knew for the entire 60 s fast-advertising window (reconnects after 63–66 s). Found by logging
+`sd_ble_gap_adv_addr_get` (LOG[0x3D..0x3F]) next to the expected address.
+
+**Selection and switching.** `S.target` = selected slot (or `HOST_NEW` = 0xFE inside a pairing window). DPI + Forward/Back (`host_chord_poll`,
+1 s) only moves `S.target` (valid slots in index order, wrapping) and starts a 1.5 s debounce; `host_switch_apply` then drops the current
+link (`leave_link`) and the DISCONNECTED handler runs `select_slot` (load the record, set it "last used" = highest sequence number, which
+the boot picks) and `adv_restart`. The record of the new host is never loaded while the old host is still connected, so a late CCCD write
+cannot land in the wrong slot. The connected host is identified at `BLE_GAP_EVT_SEC_INFO_REQUEST` by matching `ediv`/`rand` against all slots.
+
+**Pairing window** (`add_chord_poll`: DPI + Left 3 s): `S.pairing = 1` for 120 s, `S.target = HOST_NEW`, current host dropped, purple blink every
+2 s. `SEC_PARAMS_REQUEST` is refused (`PAIRING_NOT_SUPP`) unless the window is open or nothing is stored. At `AUTH_STATUS` success
+`slot_alloc` picks the slot of a host with the same identity (IRK or address), else the first free slot, else the oldest (lowest sequence
+number), and the window closes. When the window expires the previous host is selected again.
+
+**Wipe chord:** Left + Right + DPI now needs **10 s** (it erases every host and bumps the generation; at 3 s it fired by accident while
+adding a host: the generation went from 4 to 13 during one test session).
+
+**Debug state** (LOG base `0x2003F100`, word index × 4): `0x28` last flushed slot, `0x29` unused, `0x2A` last switch target, `0x2B` advertising
+restarts (uninitialised base), `0x2C` pairings refused (uninitialised base), `0x2D` `pairing | target<<8 | slot<<16 | connected<<24`,
+`0x2E/0x2F` address seed / `target<<8 | nonce`, `0x35/0x36/0x37` return codes of the last `adv_stop`/`adv_set_configure`/`adv_start`,
+`0x3C` **SWD test hook** (1 = next host, 2 = previous host, 3 = open pairing window), `0x3D..0x3F` address really advertised and its
+`sd_ble_gap_adv_addr_get` return code. Test tools: [08 §11](08-debugging.md#11-testing-the-multi-host-logic).

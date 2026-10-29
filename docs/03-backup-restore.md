@@ -89,7 +89,7 @@ make flash-first
 | Flashed a bad app, mouse does nothing | Probe still works → restore (§3). SWD is independent of the app. |
 | `pyocd` cannot connect | Check wiring/series resistors, power the mouse by its own USB, try `-f 100k`/`-f 200k`, replug the probe. |
 | `Bad AP` with `-t nrf52840` (ST-Link) | Use this repo's tools (`cortex_m` target) — see [02](02-prerequisites.md#3-check-the-probe-sees-the-chip-read-only). |
-| BLE bond lost / Windows keeps failing to encrypt | `Left+Right+DPI` held 3 s forces a clean re-pair; remove the old device in Windows first ([06](06-user-guide.md#4-pairing)). |
+| BLE bond lost / Windows keeps failing to encrypt | `Left+Right+DPI` held 10 s wipes all hosts for a clean re-pair; remove the old device in Windows first ([06](06-user-guide.md#4-pairing)). |
 | Mouse stuck in the other mode | Hold the mode chord (DPI+Back+Forward, 3 s), or erase the config page 0xFE000 (see [08](08-debugging.md#7-erase-the-mode-or-bond-record-by-hand)). |
 | Chip reports APPROTECT enabled | Only `ERASEALL` unlocks it; that wipes everything. Restore from the dump afterwards (`--include-sd`); the vendor bootloader cannot come back. |
 

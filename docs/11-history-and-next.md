@@ -34,7 +34,7 @@ HFXO state, idle parameters accepted by Windows, System OFF + wake.
 * The `--include-sd` NVMC flashing path was only dry-run here (the SD itself was flashed with
   pyocd + CMSIS-DAP during bring-up).
 * Advertising timing switch (30 s → 500 ms) and BAS notify cadence were not timed explicitly.
-* Behaviour with **two** bonded hosts: only one bond is stored (a new pairing replaces it).
+* Multi-host (4 slots): verified with two real hosts; a third/fourth host, Linux/macOS hosts and the refusal of pairing outside the window were not exercised.
 
 ## Ideas not done
 
@@ -45,8 +45,7 @@ HFXO state, idle parameters accepted by Windows, System OFF + wake.
    re-inits it for effects).
 3. **Shorter idle sleep**: the stock threshold is 420 s (u16 @ 0x200038CB); expose as a BLE
    setting or patch the default.
-4. **Multiple bonds / host slots** (the O3 has 3 channels): extend the bond page to N records
-   and add a chord to select the slot; use directed advertising by slot.
+4. ~~Multiple bonds / host slots~~ done (item 7): [07 §12](07-internals.md#12-multiple-hosts-item-7-2026-10-29).
 5. **Measure** with a current meter (e.g. PPK2) and tune connection intervals/latency
    (`probe.py slowconn …` lets you A/B without reflashing).
 6. **LESC / passkey** pairing instead of legacy Just Works.

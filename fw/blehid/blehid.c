@@ -24,6 +24,9 @@
 // ---- libc bits the compiler may call
 void *memset(void *d, int c, size_t n) { uint8_t *p = d; while (n--) *p++ = (uint8_t)c; return d; }
 void *memcpy(void *d, const void *s, size_t n) { uint8_t *p = d; const uint8_t *q = s; while (n--) *p++ = *q++; return d; }
+void __aeabi_memcpy(void *d, const void *s, size_t n) { memcpy(d, s, n); }   // the compiler turns larger struct copies into these
+void __aeabi_memcpy4(void *d, const void *s, size_t n) { memcpy(d, s, n); }
+void __aeabi_memcpy8(void *d, const void *s, size_t n) { memcpy(d, s, n); }
 int memcmp(const void *a, const void *b, size_t n) { const uint8_t *p = a, *q = b; while (n--) { if (*p != *q) return *p - *q; p++; q++; } return 0; }
 
 static const uint8_t report_map_rom[] = {
@@ -63,8 +66,15 @@ typedef struct {
     uint32_t led_t0, bat_t0, pwm_t0;
     uint8_t pwm_off;
     uint8_t bat_cand;
+    uint8_t slot;            // bond slot of the connected/last host (0xFF = none)
+    uint8_t pairing, prev_target, ac_state, target, hc_state, hc_dir, id_ok;   // host selected for advertising (slot or HOST_NEW) / host-switch chord state / S.id valid
+    uint32_t hc_t0, ac_t0, pair_win_t0, pair_blink_t0, nonce, new_nonce, sw_t0;
+    uint32_t img[256];       // RAM mirror of the bond area (4 slots x 64 words): every decision reads this, never the flash page being rewritten
+    uint8_t sw_pending;      // host selection changed, link not yet moved (debounce)
+    ble_gap_id_key_t id;     // identity (IRK + address) of the host in S.slot
+    uint16_t slot_seq;       // its pairing sequence number
     uint8_t sa[88];          // GATT system attributes (CCCD state) of the bonded peer
-    struct { uint8_t state, tries, err; uint32_t addr, words; uint32_t buf[32]; } fl;   // async flash writer (SD flash API)
+    struct { uint8_t state, tries, err; uint32_t addr, words; uint32_t buf[256]; } fl;   // async flash writer (SD flash API)
 } state_t;
 
 static state_t S;
@@ -138,20 +148,61 @@ static void led_pwm_gate(void) {
         PWM0_REG(0x500) = 0; S.pwm_off = 1;
     }
 }
-// ---- bond persistence: one 64-byte record in its own flash page, written through the SD flash API
+// ---- bond persistence: BOND_SLOTS records of 128 B in one flash page, written through the SD flash API (whole page at a time)
 #define BOND_ADDR 0xFD000u
 #define BOND_MAGIC 0xB0DD0001u
+#define BOND_SLOTS 4
+#define BOND_STRIDE 256u          // legacy 128 B record + peer identity record
+#define ID_MAGIC 0x1D1D0002u
+#define HOST_NEW 0xFE             // S.target value: no host selected, advertise to anybody so a new one can pair
 static uint32_t rec_sum(const uint32_t *w, int n) { uint32_t a = 0x5A5A1234; while (n--) a = (a << 1 | a >> 31) ^ *w++; return a; }
-// record (128 B = 32 words): [0]=magic [1]=sum(words 2..31) [2..8]=enc key (28 B) [9]=sa_len [10..31]=sys attrs (88 B)
+// record (128 B = 32 words): [0]=magic [1]=sum(words 2..31) [2..8]=enc key (28 B) [9]=sa_len | pairing seq << 16 [10..31]=sys attrs (88 B)
+// slot 0 is the single-bond record of the older firmware, so an existing bond stays valid.
+// words 32..41 of a slot: [32]=ID_MAGIC [33]=sum(34..41) [34..39]=peer identity (ble_gap_id_key_t, 23 B) [40]=address nonce [41]=identity valid;
+// absent in a legacy record (nonce 0, no identity). Every stored host has its own advertising address (generation + nonce), so a host only
+// ever finds the mouse while its slot is the selected one, and a pairing window advertises from a fresh address nobody has stored.
+static const uint32_t *slot_rec(int i) { return S.img + (BOND_STRIDE / 4) * i; }   // the RAM mirror (flash is only written, and read at boot)
+static int slot_valid(int i) { const uint32_t *w = slot_rec(i); return w[0] == BOND_MAGIC && w[1] == rec_sum(w + 2, 30); }
+static int id_rec_ok(int i) { const uint32_t *w = slot_rec(i) + 32; return w[0] == ID_MAGIC && w[1] == rec_sum(w + 2, 8); }
+static int slot_has_id(int i) { return id_rec_ok(i) && slot_rec(i)[41]; }
+static uint32_t slot_nonce(int i) { return id_rec_ok(i) ? slot_rec(i)[40] : 0; }
+static uint32_t next_nonce(void) { uint32_t m = 0; for (int i = 0; i < BOND_SLOTS; i++) if (slot_valid(i) && slot_nonce(i) > m) m = slot_nonce(i); return m + 1; }
+static uint16_t slot_seq_of(int i) { return (uint16_t)(slot_rec(i)[9] >> 16); }
+static void slot_load(int i) {
+    const uint32_t *w = slot_rec(i);
+    memcpy(&S.own_enc, w + 2, sizeof S.own_enc);
+    S.sa_len = (uint16_t)w[9];
+    if (S.sa_len > sizeof S.sa) S.sa_len = 0;
+    memcpy(S.sa, w + 10, sizeof S.sa);
+    S.id_ok = (uint8_t)slot_has_id(i); S.nonce = slot_nonce(i);
+    if (S.id_ok) memcpy(&S.id, w + 34, sizeof S.id);
+    S.slot = (uint8_t)i; S.slot_seq = slot_seq_of(i);
+    S.bonded = 1;
+}
 static void bond_load(void) {
-    const uint32_t *w = (const uint32_t *)BOND_ADDR;
-    if (w[0] == BOND_MAGIC && w[1] == rec_sum(w + 2, 30)) {
-        memcpy(&S.own_enc, w + 2, sizeof S.own_enc);
-        S.sa_len = (uint16_t)w[9];
-        if (S.sa_len > sizeof S.sa) S.sa_len = 0;
-        memcpy(S.sa, w + 10, sizeof S.sa);
-        S.bonded = 1;
+    int best = -1;
+    memcpy(S.img, (const void *)BOND_ADDR, sizeof S.img);
+    S.slot = 0xFF;
+    for (int i = 0; i < BOND_SLOTS; i++)
+        if (slot_valid(i) && (best < 0 || slot_seq_of(i) > slot_seq_of(best))) best = i;
+    if (best >= 0) slot_load(best);   // most recently paired host
+}
+// a new pairing: first free slot, else the oldest one; the new record gets the highest sequence number
+// A host that is already stored (same identity address or IRK) gets its own slot back instead of a second one.
+static void slot_alloc(const ble_gap_id_key_t *id) {
+    int s = -1, same = -1; uint16_t top = 0;
+    for (int i = 0; i < BOND_SLOTS; i++) {
+        if (!slot_valid(i)) { if (s < 0 || slot_valid(s)) s = i; continue; }
+        if (slot_seq_of(i) > top) top = slot_seq_of(i);
+        if (s < 0 || (slot_valid(s) && slot_seq_of(i) < slot_seq_of(s))) s = i;
+        if (id && slot_has_id(i)) {
+            const ble_gap_id_key_t *k = (const ble_gap_id_key_t *)(slot_rec(i) + 34);
+            if (memcmp(k->id_info.irk, id->id_info.irk, 16) == 0 || (k->id_addr_info.addr_type == id->id_addr_info.addr_type && memcmp(k->id_addr_info.addr, id->id_addr_info.addr, 6) == 0)) same = i;
+        }
     }
+    if (same >= 0) s = same;
+    LOG[0x2B] = (uint32_t)s << 8 | (same >= 0);
+    S.slot = (uint8_t)s; S.slot_seq = (uint16_t)(top + 1);
 }
 static void flash_request(uint32_t addr, const uint32_t *words, uint32_t n) {
     memcpy(S.fl.buf, words, n * 4);
@@ -187,23 +238,29 @@ static void flash_step(void) {
         break;
     }
 }
-static void bond_flush(void) {
-    uint32_t b[32];
-    memset(b, 0, sizeof b);
-    memcpy(b + 2, &S.own_enc, sizeof S.own_enc);
-    b[9] = S.sa_len;
-    memcpy(b + 10, S.sa, sizeof S.sa);
-    b[0] = BOND_MAGIC;
-    b[1] = rec_sum(b + 2, 30);
-    flash_request(BOND_ADDR, b, 32);
+static void img_store(void) {   // working copy of the connected host's record -> RAM mirror
+    uint32_t *r = S.img + (BOND_STRIDE / 4) * S.slot;
+    memset(r, 0, BOND_STRIDE);
+    memcpy(r + 2, &S.own_enc, sizeof S.own_enc);
+    r[9] = S.sa_len | ((uint32_t)S.slot_seq << 16);
+    memcpy(r + 10, S.sa, sizeof S.sa);
+    r[0] = BOND_MAGIC;
+    r[1] = rec_sum(r + 2, 30);
+    if (S.id_ok) memcpy(r + 34, &S.id, sizeof S.id);
+    r[32] = ID_MAGIC; r[40] = S.nonce; r[41] = S.id_ok; r[33] = rec_sum(r + 34, 8);
 }
-static void bond_save(void) { S.dirty = 1; }
+static void bond_flush(void) {   // the whole mirror goes to flash (erase + write, asynchronous); nothing reads the flash copy meanwhile
+    memcpy(S.fl.buf, S.img, sizeof S.img);
+    S.fl.addr = BOND_ADDR; S.fl.words = sizeof S.img / 4; S.fl.tries = 0; S.fl.err = 0; S.fl.state = 1;
+    LOG[0x28] = S.slot;
+}
+static void bond_save(void) { if (S.slot >= BOND_SLOTS) return; img_store(); S.dirty = 1; }
 // fetch the peer's system attributes (CCCDs) from the SD and persist them with the bond
 static void sa_capture_and_save(uint16_t conn) {
     uint16_t len = sizeof S.sa;
     if (sd_ble_gatts_sys_attr_get(conn, S.sa, &len, BLE_GATTS_SYS_ATTR_FLAG_SYS_SRVCS | BLE_GATTS_SYS_ATTR_FLAG_USR_SRVCS) == 0) {
         S.sa_len = len;
-        if (S.bonded) bond_save();
+        if (S.slot < BOND_SLOTS) bond_save();
     }
 }
 
@@ -268,13 +325,93 @@ static void chord_poll(void) {
     if (!S.chord_on) { S.chord_on = 1; S.chord_t0 = now; return; }
     if (((now - S.chord_t0) & 0xFFFFFF) > 98304) { S.chord_on = 0; mode_switch(); }
 }
+// Host switching: DPI + exactly one of FORWARD (next) / BACK (previous), held for 1 s. Cycles through the stored hosts only, in slot
+// order, wrapping around. The current host is dropped and the mouse advertises to the new one only.
+static void adv_restart(int fast);
+static void adv_reopen(void) {   // restart advertising with the filter for S.target (not while connected)
+    LOG[0x35] = sd_ble_gap_adv_stop(S.adv_handle);
+    adv_restart(1);
+}
+static void host_switch(int dir) {   // only moves the selection; host_switch_apply() moves the link once the user stopped pressing
+    uint8_t list[BOND_SLOTS]; int n = 0, pos = 0;
+    for (int i = 0; i < BOND_SLOTS; i++) if (slot_valid(i)) { if (i == S.target) pos = n; list[n++] = (uint8_t)i; }
+    if (n < 2) return;
+    uint8_t t = list[(pos + n + dir) % n];
+    LOG[0x2A] = t;
+    S.pairing = 0;
+    S.target = t;
+    S.sw_pending = 1; S.sw_t0 = RTC1_COUNTER;
+    led_start(4, (uint8_t)(t + 1));
+}
+#define SWITCH_DEBOUNCE_TICKS 49152u   // 1.5 s
+// Make slot t the working record and "last used" (highest sequence number = the boot choice). Only while no host is connected, so a late
+// CCCD write of the old host can never be saved into the new host's record.
+static void select_slot(uint8_t t) {
+    uint16_t top = 0;
+    for (int i = 0; i < BOND_SLOTS; i++) if (slot_valid(i) && slot_seq_of(i) > top) top = slot_seq_of(i);
+    slot_load(t);
+    if (slot_seq_of(t) != top) { S.slot_seq = (uint16_t)(top + 1); bond_save(); }
+}
+static void host_switch_apply(void) {
+    if (!S.sw_pending || ((RTC1_COUNTER - S.sw_t0) & 0xFFFFFF) < SWITCH_DEBOUNCE_TICKS) return;
+    S.sw_pending = 0;
+    uint8_t t = S.target;
+    if (t >= BOND_SLOTS || !slot_valid(t)) return;
+    if (S.conn != BLE_CONN_HANDLE_INVALID) {
+        if (S.slot == t) return;   // already on that host
+        send_neutral();
+        leave_link();              // the DISCONNECTED event selects the slot and restarts advertising from its address
+    } else {
+        select_slot(t);
+        adv_reopen();
+    }
+}
+static void host_chord_poll(void) {
+    uint32_t in0 = *(volatile uint32_t *)0x50000510, in1 = *(volatile uint32_t *)0x50000810;
+    int dpi = !(in1 & 1), fwd = !(in0 & (1u << 10)), back = !(in0 & (1u << 9)), lft = !(in1 & (1u << 15)), rgt = !(in1 & (1u << 13));
+    uint32_t now = RTC1_COUNTER;
+    if (!(dpi && (fwd ^ back) && !lft && !rgt)) { S.hc_state = 0; return; }
+    if (S.hc_state == 0) { S.hc_state = 1; S.hc_t0 = now; S.hc_dir = fwd ? 1 : 0; return; }
+    if (S.hc_state == 1 && ((now - S.hc_t0) & 0xFFFFFF) > 32768) { S.hc_state = 2; host_switch(S.hc_dir ? 1 : -1); }
+}
+// Adding a host: DPI + LEFT held for 3 s opens a 120 s pairing window (purple blink every 2 s while it is open) (open advertising, pairing accepted). A host that is already
+// stored gets its own slot back, a new one takes a free slot (or replaces the oldest). Pairing is refused outside the window.
+#define PAIR_WINDOW_TICKS (120u * 32768u)
+static void pair_window_open(void) {
+    send_neutral();
+    S.pairing = 1; S.sw_pending = 0; S.pair_win_t0 = S.pair_blink_t0 = RTC1_COUNTER;
+    S.prev_target = S.target; S.target = HOST_NEW; S.new_nonce = next_nonce();
+    led_start(5, 2);
+    if (S.conn != BLE_CONN_HANDLE_INVALID) leave_link();
+    else adv_reopen();
+}
+static void pair_window_poll(void) {   // closes the window after 120 s; a finished pairing closes it too (AUTH_STATUS)
+    if (!S.pairing) return;
+    uint32_t now = RTC1_COUNTER;
+    if (!S.led_state && ((now - S.pair_blink_t0) & 0xFFFFFF) > 65536) { S.pair_blink_t0 = now; led_start(5, 1); }
+    if (((now - S.pair_win_t0) & 0xFFFFFF) < PAIR_WINDOW_TICKS) return;
+    S.pairing = 0;
+    int any = 0;
+    for (int i = 0; i < BOND_SLOTS; i++) any |= slot_valid(i);
+    if (!any) return;                                   // nothing stored: stay open
+    S.target = S.prev_target < BOND_SLOTS && slot_valid(S.prev_target) ? S.prev_target : 0;
+    if (S.conn == BLE_CONN_HANDLE_INVALID) adv_reopen();   // connected (mid-pairing): leave it, the filter applies at the next restart
+}
+static void add_chord_poll(void) {
+    uint32_t in0 = *(volatile uint32_t *)0x50000510, in1 = *(volatile uint32_t *)0x50000810;
+    int dpi = !(in1 & 1), lft = !(in1 & (1u << 15)), rgt = !(in1 & (1u << 13)), fb = !(in0 & (1u << 10)) || !(in0 & (1u << 9));
+    uint32_t now = RTC1_COUNTER;
+    if (!(dpi && lft && !rgt && !fb)) { S.ac_state = 0; return; }
+    if (S.ac_state == 0) { S.ac_state = 1; S.ac_t0 = now; return; }
+    if (S.ac_state == 1 && ((now - S.ac_t0) & 0xFFFFFF) > 98304) { S.ac_state = 2; pair_window_open(); }
+}
 static void pair_chord_poll(void) {
     if (!SD_FLAG) return;
     uint32_t in1 = *(volatile uint32_t *)0x50000810;
     if ((~in1 & PAIR_P1_DEFAULT) != PAIR_P1_DEFAULT) { S.pair_on = 0; return; }
     uint32_t now = RTC1_COUNTER;
     if (!S.pair_on) { S.pair_on = 1; S.pair_t0 = now; return; }
-    if (((now - S.pair_t0) & 0xFFFFFF) > 98304) { S.pair_on = 0; led_start(5, 3); pair_reset(); }
+    if (((now - S.pair_t0) & 0xFFFFFF) > 327680) { S.pair_on = 0; led_start(5, 3); pair_reset(); }   // 10 s: it erases every stored host
 }
 
 static void logev(uint32_t id) {
@@ -346,10 +483,32 @@ static uint32_t start_adv(void) {
     return sd_ble_gap_adv_start(S.adv_handle, BLE_CONN_CFG_TAG_DEFAULT);
 }
 // Advertising power policy: 50 ms for 30 s after boot/disconnect (quick reconnect), then 500 ms until a host connects.
+// Advertising address = f(pairing generation, nonce of the selected slot); HOST_NEW uses the next unused nonce. Call only while not advertising.
+static void adv_addr(void) {
+    uint32_t gen = cfg_gen(), n = S.target < BOND_SLOTS ? slot_nonce(S.target) : S.new_nonce;
+    if (!(gen | n)) return;
+    uint32_t lo = *(volatile uint32_t *)0x100000A4 ^ (gen * 0x9E3779B1u) ^ (n * 0x85EBCA6Bu), hi = *(volatile uint32_t *)0x100000A8;
+    ble_gap_addr_t a;
+    memset(&a, 0, sizeof a);
+    a.addr_type = BLE_GAP_ADDR_TYPE_RANDOM_STATIC;
+    a.addr[0] = (uint8_t)lo; a.addr[1] = (uint8_t)(lo >> 8); a.addr[2] = (uint8_t)(lo >> 16); a.addr[3] = (uint8_t)(lo >> 24);
+    a.addr[4] = (uint8_t)hi; a.addr[5] = (uint8_t)((hi >> 8) | 0xC0);
+    LOG[0x27] = sd_ble_gap_addr_set(&a);
+    LOG[0x2E] = lo; LOG[0x2F] = (uint32_t)S.target << 8 | n;   // test visibility: address seed, selected slot / nonce
+}
 static void adv_restart(int fast) {
-    S.advp.interval = fast ? 0x50 : 800;
-    S.advp.duration = fast ? 3000 : 0;
-    if (sd_ble_gap_adv_set_configure(&S.adv_handle, &S.adv, &S.advp) == 0) start_adv();
+    adv_addr();
+    S.advp.interval = fast ? 0x30 : 800;   // fast: 30 ms for 60 s (a host's reconnect scan gets many chances), then 500 ms
+    S.advp.duration = fast ? 6000 : 0;
+    LOG[0x36] = sd_ble_gap_adv_set_configure(&S.adv_handle, &S.adv, &S.advp);
+    LOG[0x37] = LOG[0x36] ? 0xFFFF : start_adv();
+    LOG[0x2B]++;   // advertising restarts since boot (the three words above hold the last return codes)
+    {   // what the SoftDevice really advertises: address (LOG[0x3D], LOG[0x3E]) and the call's return code (LOG[0x3F])
+        ble_gap_addr_t ca; memset(&ca, 0, sizeof ca);
+        LOG[0x3F] = sd_ble_gap_adv_addr_get(S.adv_handle, &ca);
+        LOG[0x3D] = ca.addr[0] | ca.addr[1] << 8 | ca.addr[2] << 16 | (uint32_t)ca.addr[3] << 24;
+        LOG[0x3E] = ca.addr[4] | ca.addr[5] << 8 | (uint32_t)ca.addr_type << 16;
+    }
 }
 
 // DONGLE mode (no SoftDevice): only state/chord support
@@ -373,6 +532,8 @@ uint32_t blehid_init(void) {
     S.hf_t0 = RTC1_COUNTER;
     LOG[0x20] = LOG[0x21] = LOG[0x22] = 0;
     bond_load();
+    S.target = S.slot < BOND_SLOTS ? S.slot : HOST_NEW;
+    S.new_nonce = next_nonce();
     S.chord_p0 = CHORD_P0_DEFAULT; S.chord_p1 = CHORD_P1_DEFAULT;
     led_start(S.bonded ? 4 : 5, 2);   // boot indicator: BLE = 2 blue blinks, 2 purple blinks while unpaired (pairing mode)
     LOG[0x23] = S.bonded;
@@ -431,18 +592,7 @@ uint32_t blehid_init(void) {
     S.advp.duration = 3000;   // 30 s fast (50 ms), then slow (500 ms): see adv_restart()
     S.advp.primary_phy = BLE_GAP_PHY_1MBPS;
     S.adv_handle = BLE_GAP_ADV_SET_HANDLE_NOT_SET;
-    {   // pairing generation > 0 (after a forced re-pair): advertise from a new static random address so hosts see a new device
-        uint32_t gen = cfg_gen();
-        if (gen) {
-            uint32_t lo = *(volatile uint32_t *)0x100000A4 ^ (gen * 0x9E3779B1u), hi = *(volatile uint32_t *)0x100000A8;
-            ble_gap_addr_t a;
-            memset(&a, 0, sizeof a);
-            a.addr_type = BLE_GAP_ADDR_TYPE_RANDOM_STATIC;
-            a.addr[0] = (uint8_t)lo; a.addr[1] = (uint8_t)(lo >> 8); a.addr[2] = (uint8_t)(lo >> 16); a.addr[3] = (uint8_t)(lo >> 24);
-            a.addr[4] = (uint8_t)hi; a.addr[5] = (uint8_t)((hi >> 8) | 0xC0);
-            LOG[0x27] = sd_ble_gap_addr_set(&a);
-        }
-    }
+    adv_addr();
     if ((e = sd_ble_gap_adv_set_configure(&S.adv_handle, &S.adv, &S.advp))) { LOG[1] = 0x100 | 15; return e; }
     if ((e = start_adv())) { LOG[1] = 0x100 | 16; return e; }
     LOG[1] = 0x1000;   // ok
@@ -477,6 +627,7 @@ static void on_evt(const ble_evt_t *ev) {
     case BLE_GAP_EVT_CONNECTED:
         S.conn = ch;
         S.notify_on = 0;
+        S.sa_len = 0; S.slot = 0xFF;   // whichever host this is, it is matched to its slot at encryption time
         LOG[0x30] = ev->evt.gap_evt.params.connected.conn_params.max_conn_interval;   // initial interval (1.25 ms units)
         LOG[0x31] = 0;
         led_start(4, 1);           // BLE connected: one blue blink
@@ -493,27 +644,44 @@ static void on_evt(const ble_evt_t *ev) {
     case BLE_GAP_EVT_DISCONNECTED:
         S.conn = BLE_CONN_HANDLE_INVALID;
         S.notify_on = 0;
+        if (S.target < BOND_SLOTS && slot_valid(S.target) && S.slot != S.target) select_slot(S.target);   // a switch was requested
         adv_restart(1);
         break;
-    case BLE_GAP_EVT_SEC_PARAMS_REQUEST:
-        memset(&S.keyset, 0, sizeof S.keyset);
+    case BLE_GAP_EVT_SEC_PARAMS_REQUEST: {
+        int any = 0;
+        for (int i = 0; i < BOND_SLOTS; i++) any |= slot_valid(i);
+        if (any && !S.pairing) {   // pairing is only accepted in the pairing window (DPI + LEFT, 3 s) or with no host stored
+            LOG[0x2C]++;
+            sd_ble_gap_sec_params_reply(ch, BLE_GAP_SEC_STATUS_PAIRING_NOT_SUPP, NULL, NULL);
+            break;
+        }
+        memset(&S.keyset, 0, sizeof S.keyset); memset(&S.peer_id, 0, sizeof S.peer_id);
         S.keyset.keys_own.p_enc_key = &S.own_enc;
         S.keyset.keys_peer.p_enc_key = &S.peer_enc;
         S.keyset.keys_peer.p_id_key = &S.peer_id;
         logev(0x10000 | sd_ble_gap_sec_params_reply(ch, BLE_GAP_SEC_STATUS_SUCCESS, &secp, &S.keyset));
         break;
+    }
     case BLE_GAP_EVT_AUTH_STATUS:
-        S.bonded = ev->evt.gap_evt.params.auth_status.auth_status == BLE_GAP_SEC_STATUS_SUCCESS;
-        if (S.bonded) bond_save();
+        if (ev->evt.gap_evt.params.auth_status.auth_status == BLE_GAP_SEC_STATUS_SUCCESS) {
+            const uint8_t *ia = S.peer_id.id_addr_info.addr;
+            S.id_ok = (ia[0] | ia[1] | ia[2] | ia[3] | ia[4] | ia[5]) ? 1 : 0;
+            if (S.id_ok) S.id = S.peer_id;
+            S.bonded = 1; slot_alloc(S.id_ok ? &S.id : NULL); S.target = S.slot; S.pairing = 0; S.nonce = S.new_nonce;
+            bond_save();
+        }
         logev(0x20000 | ev->evt.gap_evt.params.auth_status.auth_status);
         break;
     case BLE_GAP_EVT_SEC_INFO_REQUEST: {
         const ble_gap_evt_sec_info_request_t *r = &ev->evt.gap_evt.params.sec_info_request;
-        if (S.bonded && r->enc_info && r->master_id.ediv == S.own_enc.master_id.ediv &&
-            memcmp(r->master_id.rand, S.own_enc.master_id.rand, 8) == 0)
-            { S.reconn = 1; sd_ble_gap_sec_info_reply(ch, &S.own_enc.enc_info, NULL, NULL); }
-        else
-            sd_ble_gap_sec_info_reply(ch, NULL, NULL, NULL);
+        int hit = -1;
+        if (r->enc_info)
+            for (int i = 0; i < BOND_SLOTS; i++) {
+                const ble_gap_enc_key_t *k = (const ble_gap_enc_key_t *)(slot_rec(i) + 2);
+                if (slot_valid(i) && r->master_id.ediv == k->master_id.ediv && memcmp(r->master_id.rand, k->master_id.rand, 8) == 0) hit = i;
+            }
+        if (hit >= 0) { slot_load(hit); S.target = (uint8_t)hit; S.reconn = 1; LOG[0x28] = (uint32_t)hit; sd_ble_gap_sec_info_reply(ch, &S.own_enc.enc_info, NULL, NULL); }
+        else sd_ble_gap_sec_info_reply(ch, NULL, NULL, NULL);
         break;
     }
     case BLE_GAP_EVT_CONN_SEC_UPDATE:
@@ -596,6 +764,9 @@ void blehid_tick(void) {
     APP_BUILD();
     chord_poll();
     pair_chord_poll();
+    if (SD_FLAG) { host_chord_poll(); add_chord_poll(); pair_window_poll(); host_switch_apply(); }
+    if (SD_FLAG && LOG[0x3C]) { uint32_t c = LOG[0x3C]; LOG[0x3C] = 0; if (c == 1) host_switch(1); else if (c == 2) host_switch(-1); else if (c == 3) pair_window_open(); }   // SWD test hook
+    LOG[0x2D] = S.pairing | (uint32_t)S.target << 8 | (uint32_t)S.slot << 16 | (S.conn != BLE_CONN_HANDLE_INVALID) << 24;   // pairing window / selected host / active slot / connected
     led_tick();
     led_pwm_gate();
     if (!SD_FLAG) return;          // DONGLE mode: SoftDevice off, nothing else to do

@@ -77,7 +77,7 @@ python tools/mkhex.py         # -> build/s140_730_golden27000.hex  (0x0 .. 0x3e2
 ```bash
 fw/blehid/build.sh
 # ld.lld: warning: cannot find entry symbol _start; not setting start address   <- harmless
-# -rwxrwxr-x 1 … 4772 … build/blehid.bin
+# -rwxrwxr-x 1 … 8256 … build/blehid.bin
 ```
 
 `blehid.c` is freestanding C (no libc, no startup code), linked at **0x40000** with its RAM at
@@ -106,10 +106,10 @@ ZIG="zig" OBJCOPY=llvm-objcopy fw/blehid/build.sh # use a system zig / objcopy
 
 ```bash
 python tools/mk_ble.py 720
-# stub 266 thunk 16 blob 4772 attr_tab 720 init 0x400b3 poll 0x40b25 send 0x40ab3 state 0x2000b400
-# hex 0x0 0x412a3
+# stub 266 thunk 16 blob 8256 attr_tab 720 init 0x400eb poll 0x410c9 send 0x41055 state 0x2000b400
+# hex 0x0 0x4203f
 sha256sum build/s140_730_golden27000_ble.hex
-# d52120ccf9a3a79715ffbc104d89daad8246ebeae59626a8605c12837d812175
+# 5f594448c9de6e2fe5e10351e0c66f6bfd4ec1c447cc7bd35ff3e89b5053ed64
 ```
 
 `720` is the GATT attribute table size passed to `sd_ble_cfg_set` (enough for DIS + BAS +

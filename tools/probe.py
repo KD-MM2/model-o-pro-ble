@@ -20,7 +20,9 @@ if cmd == 'status':
     st = r32(0x4000040C)
     print('HFCLKSTAT 0x%08x -> HFXO %s' % (st, 'RUNNING' if (st & 0x10001) == 0x10001 else 'off (RC oscillator)'))
     print('config page 0xFE000: %s' % [hex(x) for x in t.read_memory_block32(0xFE000, 4)], '(C0DE0001, mode 1=BLE 2=DONGLE, ~mode, generation)')
-    print('bond page   0xFD000: magic 0x%08x (B0DD0001 = bonded)' % r32(0xFD000))
+    for i in range(4):
+        w = t.read_memory_block32(0xFD000 + 256 * i, 10)
+        print('bond slot %d 0x%X: %s' % (i, 0xFD000 + 256 * i, ('bonded, pairing seq %d, ediv 0x%04x, sys-attr len %d' % (w[9] >> 16, w[7] & 0xFFFF, w[9] & 0xFFFF)) if w[0] == 0xB0DD0001 else 'empty (magic 0x%08x)' % w[0]))
     L = 0x2003F100
     names = {0x00: 'magic', 0x04: 'init stage/err (0x1000 = ok)', 0x08: 'BLE events seen', 0x80: 'hvx last result', 0x84: 'reports sent',
              0xC0: 'conn interval @connect', 0xC4: 'conn interval after update', 0xC8: 'slave latency', 0xD0: 'conn_param_update rc',

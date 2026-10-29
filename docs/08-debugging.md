@@ -199,3 +199,17 @@ How to read the output:
 Case study (2026-10-27): unplugging USB after using Glorious CORE → id 0x1001 at orig 0x15A34 (`RADIO.POWER` write in the 2.4G power-up),
 then at orig 0x18ADE (TIMER0 setup), both from the link state machine reacting to "USB removed". Fixed with the gates in
 [07 §4](07-internals.md#4-patch-table); verified with repeated unplug/replug cycles under the trap.
+
+## 11. Testing the multi-host logic
+
+| Tool | Use |
+|---|---|
+| `tools/fake_bonds.py save F \| restore F \| fill N [--go]` | copy the bond area to/from a file; `fill N` fabricates bonds in the empty slots (random keys, never match a real host) so the cycle can be tested without extra hosts. **Always `save` first**; `tools/erase_page.py bond --go` removes fakes |
+| `tools/cycle_test.py FWD BACK` | drives the switch through the SWD hook (LOG[0x3C]) and prints the host number reached at every step (verified for 4, 3, 2 and 1 configured hosts) |
+| `tools/switch_test.py [rounds]` | two real hosts: switch back and forth, report time-to-connect, the address the SoftDevice advertises against the expected one, and what a scan from the Windows rig sees if there is no link after 10 s |
+| `tools/switch_trace.py N GAP` | press the hook N times (0 = passive) and log events, target/slot/connected **and the chord buttons held**, so a user's physical press can be told apart from the script. This is what showed that "random" target changes were the user pressing DPI + Forward during an automated run |
+| `tools/pairwatch.py [s]` | passive monitor of pairing/selection state and slot summary (event ids 0x55/0x57 are report-sent noise) |
+
+Rules learned: do not run an automated switch test while someone is pressing buttons; `pkill -f`/`pgrep -f` patterns that appear in the
+shell's own command line kill or match the shell (use `pgrep -f "[p]attern"`); only one SWD tool can hold the probe at a time (faultcatch,
+pairwatch and switch_trace all do).

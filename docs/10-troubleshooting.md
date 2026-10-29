@@ -24,6 +24,10 @@
 | `hvx` returns `0x3401` | CCCD/sys attributes not set yet | normal before the host enables notifications |
 | BLE events show `0x10,0x23,0x24,0x14,0x11` repeating | host retries encryption with an old key | remove host-side bond |
 | Chords do nothing | wrong pins on your board or masks overridden by SWD | `probe.py chord …`; check pin table in 07 |
+| After DPI + Forward/Back the other host takes seconds (or minutes) to appear | the host's own reconnect scan (phones with the screen off are slowest); the mouse advertises the right address at 30 ms for 60 s | wake the phone, toggle its Bluetooth, or press the chord again; check `tools/switch_test.py` that the advertised address equals the expected one |
+| Scanner shows several "Model O PRO Wireless" devices | every stored host and every pairing window has its own address (and old ones after a wipe) | harmless; remove stale entries on the host |
+| A new host cannot pair | pairing is only accepted in the pairing window | hold **DPI + Left** 3 s (purple blinks), pair within 120 s |
+| All hosts forgot the mouse after trying to add one | the wipe chord (Left + Right + DPI) was held; it needs 10 s now | pair again; use DPI + Left to add hosts |
 | Sleep looks "not working" | debugger attached (emulated), or the idle timer is long | detach; the idle sleep is `BLE_SLEEP_S` in `blehid.c` (default 420 s) |
 
 ## Hard-won lessons (short form)
