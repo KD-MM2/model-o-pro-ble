@@ -201,7 +201,8 @@ blehid log `LOG[]` base **0x2003F100** (`uint32_t` indices, byte offset = index 
 | DPI | P1.0 |
 | Wheel A / B | P0.2 / P0.29 |
 | Sensor SPI2 | SCK P0.12, MOSI P0.8, MISO P0.11, motion IRQ P0.6 |
-| RGB LED | PWM0: P0.13 R, P0.15 G, P0.17 B |
+| RGB LED (status) | PWM0: P0.13 R, P0.15 G, P0.17 B; duty buffer `0x20003270` (4 × u16, bit 15 set = polarity) |
+| RGB LED (DPI) | PWM1: P0.20 R, P0.22 G, P0.24 B; duty buffer `0x20003278`; no interrupt, free-running |
 | Button inputs read by chords | P0 IN `0x50000510`, P1 IN `0x50000810` |
 | Timebase | RTC1 COUNTER `0x40011504`, 32 768 Hz (stock app timer) |
 | 1 ms tick | TIMER1 (handler orig 0x18BA4, byte counter @0x2000306C) |
@@ -297,3 +298,24 @@ restarts (uninitialised base), `0x2C` pairings refused (uninitialised base), `0x
 `0x2E/0x2F` address seed / `target<<8 | nonce`, `0x35/0x36/0x37` return codes of the last `adv_stop`/`adv_set_configure`/`adv_start`,
 `0x3C` **SWD test hook** (1 = next host, 2 = previous host, 3 = open pairing window), `0x3D..0x3F` address really advertised and its
 `sd_ble_gap_adv_addr_get` return code. Test tools: [08 §11](08-debugging.md#11-testing-the-multi-host-logic).
+
+## 13. The stock LED engine
+
+Two RGB LEDs, each on its own PWM instance (PRESCALER 7, COUNTERTOP 255, LOOP 1, SHORTS LOOPSDONE→SEQSTART0, so they free-run once started):
+
+| LED | PWM | pins | duty buffer | interrupt |
+|---|---|---|---|---|
+| status (mode / connect blinks) | PWM0 `0x4001C000` | P0.13/15/17 | `0x20003270` | **yes**: `INTEN = LOOPSDONE \| STOPPED`, NVIC IRQ 28 |
+| DPI indicator | PWM1 `0x40021000` | P0.20/22/24 | `0x20003278` | none |
+
+The PWM0 interrupt is the **heartbeat of the stock LED engine for both LEDs**: vector 44 → orig `0x66F0` → tail call to the generic nrfx PWM IRQ handler `0xD790` →
+the update callback near `0x6690`, which loops over two instances and copies the new duty values into both buffers. The function at orig `0xA3F0` fills the
+buffers from the effect state (each duty value is `value | 0x8000`).
+
+Consequences:
+
+* **Never stop or disable PWM0** (or its interrupt). A version of this project did (to save the PWM clock while the status LED was dark): the DPI LED then
+  stopped following the stock effect state (it no longer lit when the mouse was lifted). It saved nothing anyway: PWM1 stays enabled.
+* Our mode/connect blinks only **overlay the three PWM0 duty values** (`led_tick`) and put the saved stock values back; nothing else is touched.
+* The DPI LED shows the stock effect state; it is lit after boot and follows the sensor/DPI logic, none of which this project changes.
+* Both PWM peripherals are switched off by the stock sleep path (System OFF) after the idle timeout; `ledwatch.py` shows `PWM0 en=0 PWM1 en=0` when that happens.

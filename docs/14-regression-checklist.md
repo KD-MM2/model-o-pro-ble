@@ -109,3 +109,13 @@ an already stored host, mixed with the user pressing the chords by hand.
   4. *New slot loaded while the old host was still connected* (a late CCCD write could have been saved into the wrong slot). Now loaded after the disconnect.
 * **Not verified:** pairing refusal outside the window, a third/fourth real host, Linux/macOS hosts, power draw while advertising 30 ms for 60 s after a switch.
 * New image sha256 `5f594448c9de6e2fe5e10351e0c66f6bfd4ec1c447cc7bd35ff3e89b5053ed64` (blob 8256 B).
+
+### Run 5 — 2026-10-29, LED regression found by the owner
+
+After item 5 ("stop PWM0 while the status LED is dark") the owner reported that the **DPI LED no longer lit when the mouse was lifted**. I had verified the
+status LED only (PWM0 enabled during the boot blink, disabled afterwards, blink seen) and not the other LED.
+
+* Cause: the stock LED engine is clocked by PWM0's loops-done interrupt for both LEDs ([07 §13](07-internals.md#13-the-stock-led-engine)); with PWM0 stopped the DPI LED state froze.
+* The gate was removed (build `blehid.c` without `led_pwm_gate`); PWM0 and PWM1 are both enabled while awake, the DPI LED shows its colour after boot.
+* Awaiting the owner's lift/place check on the fixed image. Lesson: an optimisation that touches a stock peripheral needs a check of **everything** that peripheral serves, and the owner
+  noticing a behaviour change is a regression signal; add "lift the mouse, click DPI, watch both LEDs" to the checklist.

@@ -26,6 +26,7 @@
 | Chords do nothing | wrong pins on your board or masks overridden by SWD | `probe.py chord …`; check pin table in 07 |
 | After DPI + Forward/Back the other host takes seconds (or minutes) to appear | the host's own reconnect scan (phones with the screen off are slowest); the mouse advertises the right address at 30 ms for 60 s | wake the phone, toggle its Bluetooth, or press the chord again; check `tools/switch_test.py` that the advertised address equals the expected one |
 | Scanner shows several "Model O PRO Wireless" devices | every stored host and every pairing window has its own address (and old ones after a wipe) | harmless; remove stale entries on the host |
+| DPI LED stays dark / does not react (lift, DPI click) | an image built with the PWM0 gate (commit "Item 5", reverted): PWM0's interrupt drives the stock LED engine for both LEDs | rebuild from a current tree; check `tools/ledwatch.py`: `PWM0 en=1 PWM1 en=1` while awake |
 | A new host cannot pair | pairing is only accepted in the pairing window | hold **DPI + Left** 3 s (purple blinks), pair within 120 s |
 | All hosts forgot the mouse after trying to add one | the wipe chord (Left + Right + DPI) was held; it needs 10 s now | pair again; use DPI + Left to add hosts |
 | Sleep looks "not working" | debugger attached (emulated), or the idle timer is long | detach; the idle sleep is `BLE_SLEEP_S` in `blehid.c` (default 420 s) |
