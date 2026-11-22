@@ -8,8 +8,9 @@ small BLE module (`fw/blehid/blehid.c`, about 4 KB) is hooked into the vendor's 
 This branch is the minimal version: one host, no power optimisations, no debug hooks.
 Read [DISCLAIMER.md](DISCLAIMER.md) first. You need SWD access (open the mouse) and a probe (ST-Link V2 clone or CMSIS-DAP).
 
-> **Status:** the image builds, every patch site is asserted against the stock bytes, and the new thunks were run in an
-> emulator (unicorn) in both modes. This exact image has **not been run on a mouse yet.**
+> **Status:** tested on a mouse (2026-11-22, image `c8979df5…`, flashed with `make flash` over the multi-host build):
+> boots in RF mode, the mode chord switches to BLE, the new-host chord clears the bond, a host pairs and gets
+> the 7.5 ms interval, mouse reports flow, and the host reconnects without re-pairing. No faults.
 
 ## Behaviour
 
