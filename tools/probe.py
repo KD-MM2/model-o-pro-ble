@@ -9,15 +9,29 @@ s.open(); t = s.target
 r32 = t.read32
 cmd = sys.argv[1] if len(sys.argv) > 1 else 'status'
 if cmd == 'status':
+    # where the CPU runs: DWT program counter samples (enable DWT with DEMCR.TRCENA, no halt needed)
+    t.write32(0xE000EDFC, r32(0xE000EDFC) | (1 << 24))
+    pcs = [r32(0xE000101C) for _ in range(8)]
+    where = lambda pc: 'bootloader' if 0xF8000 <= pc < 0xFE000 else 'MBR' if pc < 0x1000 else 'SoftDevice' if pc < 0x27000 \
+        else 'app' if pc < 0xF5000 else 'sleep/unknown'
+    print('running in      : %s  (PC samples %s)' % ('/'.join(sorted({where(p) for p in pcs})), ' '.join('%#x' % p for p in pcs[:4])))
     sd = t.read8(0x20003830)
     print('mode            : %s  (SoftDevice enabled flag [0x20003830] = %d)' % ('BLE' if sd else 'RF (stock)', sd))
     print('stock mode var  : %d  ([0x20003003]: 1 = on battery, 0 = USB attached)' % t.read8(0x20003003))
     print('fault registers : CFSR 0x%08x HFSR 0x%08x  (both 0 = no fault)' % (r32(0xE000ED28), r32(0xE000ED2C)))
-    c = t.read_memory_block32(0xFE000, 4)
+    c = t.read_memory_block32(0xF6000, 4)
     ok = c[0] == 0xC0DE0001 and (c[1] ^ c[2]) == 0xFFFFFFFF
-    print('config 0xFE000  : %s' % (('mode %d (1 = BLE, 2 = RF), pairing generation %d' % (c[1], c[3] if c[3] != 0xFFFFFFFF else 0))
+    print('config 0xF6000  : %s' % (('mode %d (1 = BLE, 2 = RF), pairing generation %d' % (c[1], c[3] if c[3] != 0xFFFFFFFF else 0))
                                      if ok else 'none (defaults: BLE, generation 0)'))
-    print('bond 0xFD000    : %s' % ('a host is bonded' if r32(0xFD000) == 0xB0DD0001 else 'no bond (pairing allowed)'))
+    print('bond 0xF7000    : %s' % ('a host is bonded' if r32(0xF7000) == 0xB0DD0001 else 'no bond (pairing allowed)'))
+    m = t.read_memory_block32(0xFF8, 2)
+    st = t.read_memory_block32(0xFF000, 12)   # nrf_dfu_settings_t: crc, version, app_version, bl_version, layout, current, bank_0, bank_1
+    print('bootloader      : %s; MBR 0xFF8 = %#x (%s); GPREGRET %#x' % (
+        'installed' if r32(0xF8000) != 0xFFFFFFFF else 'not installed', m[0],
+        'active' if m[0] == 0xF8000 else 'not active' if m[0] == 0xFFFFFFFF else 'UNEXPECTED', r32(0x4000051C)))
+    if st[1] != 0xFFFFFFFF:
+        print('settings 0xFF000: app version %d, bank 0 = %d bytes crc %#x code %#x (1 = valid app), bank 1 code %#x' % (
+            st[2], st[6], st[7], st[8], st[11]))
     S = 0x2003F000   # stub log, written by the SoftDevice bring-up in mk_ble.py (BLE mode only)
     print('stub log        : power_init %d, sdh_enable %d, cfg attr %d, cfg uuid %d, ble_enable %d, app RAM %#x, blehid_init %#x, %s' % (
         r32(S + 4), r32(S + 8), r32(S + 0xC), r32(S + 0x10), r32(S + 0x14), r32(S + 0x18), r32(S + 0x1C),

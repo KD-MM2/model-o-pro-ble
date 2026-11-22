@@ -1,0 +1,4 @@
+#!/bin/bash
+# Run Nordic's nrfutil nrf5sdk-tools (installed by tools/fetch_bootloader_tools.sh) with its state kept inside vendor/.
+R="$(cd "$(dirname "$0")/.." && pwd)"
+NRFUTIL_HOME="$R/vendor/nrfutil-home" exec "$R/vendor/bin/nrfutil" nrf5sdk-tools "$@"
