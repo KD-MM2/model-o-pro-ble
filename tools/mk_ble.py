@@ -25,7 +25,7 @@ APP_BASE = 0x27000
 STUB, THUNKS, BLOB = 0x3F000, 0x3F800, 0x40000
 ATTR_TAB = int(sys.argv[1], 0) if len(sys.argv) > 1 else 720   # GATT attribute table size given to the SoftDevice
 STUB_LOG = 0x2003F000             # [4] power_init [8] sdh_enable [0xC] cfg attr [0x10] cfg uuid [0x14] ble_enable [0x18] app RAM [0x1C] blehid_init [0x24] done
-CFG = 0xFE000                     # config record (see fw/blehid/blehid.c): magic, mode, ~mode, generation
+CFG = 0xF6000                     # config record (see fw/blehid/blehid.c): magic, mode, ~mode, generation
 SD_FLAG = 0x20003830
 
 ks = Ks(KS_ARCH_ARM, KS_MODE_THUMB)

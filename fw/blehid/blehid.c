@@ -5,7 +5,7 @@
 // tools/mk_ble.py hooks the stock code at a few points and calls the entry points in ENTRY[] at the start of this blob.
 //
 // Behaviour
-//   * Two modes, kept in the config record (page 0xFE000) and toggled with DPI + Back + Forward held 3 s (then reboot):
+//   * Two modes, kept in the config record (page 0xF6000) and toggled with DPI + Back + Forward held 3 s (then reboot):
 //       RF  = the stock firmware as shipped, SoftDevice off: 2.4 GHz dongle, and USB when a data cable is enumerated.
 //       BLE = SoftDevice on; mouse reports go over BLE only, a cable only charges (REPORT_T in mk_ble.py).
 //   * One host. Pairing is accepted only while no host is bonded. Left + Right + DPI held 3 s forgets the host, moves the
@@ -14,6 +14,11 @@
 //     is encrypted.
 //   * No power saving of its own: advertising every 50 ms without timeout, no slave latency. The stock 7-minute idle sleep
 //     still happens (mk_ble.py only makes it SoftDevice-safe).
+//   * DPI + Left + Back held 3 s (both modes) reboots into the Nordic DFU bootloader (fw/bootloader) for an update over BLE.
+//
+// Flash records: the config record (0xF6000) and the bond record (0xF7000) sit in the bootloader's application data area
+// (0xF5000-0xF7FFF, NRF_DFU_APP_DATA_AREA_SIZE = 3 pages), which a DFU update never erases. Above it the bootloader owns
+// 0xF8000-0xFFFFF (code, MBR parameter page 0xFE000, settings page 0xFF000) and write-protects it while the app runs.
 #include <stdint.h>
 #include <stddef.h>
 #include "ble.h"
@@ -35,7 +40,11 @@
 #define MODE_CHORD_P0 ((1u << 9) | (1u << 10))            // mode chord: BACK + FORWARD + DPI
 #define MODE_CHORD_P1 (1u << 0)
 #define PAIR_CHORD_P1 ((1u << 15) | (1u << 13) | (1u << 0)) // pair chord: LEFT + RIGHT + DPI
+#define DFU_CHORD_P0 (1u << 9)                            // DFU chord: DPI + LEFT + BACK
+#define DFU_CHORD_P1 ((1u << 15) | (1u << 0))
 #define CHORD_TICKS (3u * 32768u)                         // 3 s
+#define POWER_GPREGRET (*(volatile uint32_t *)0x4000051C)
+#define BOOTLOADER_DFU_START 0xB1                         // GPREGRET value that makes the Nordic bootloader stay in DFU mode
 
 // ---- libc bits the compiler may call (freestanding build)
 void *memset(void *d, int c, size_t n) { uint8_t *p = d; while (n--) *p++ = (uint8_t)c; return d; }
@@ -68,8 +77,8 @@ typedef struct {
     uint32_t evt_buf[64];          // 256 B, word aligned, for sd_ble_evt_get
     uint16_t sa_len;
     uint8_t sa[88];                // GATT system attributes of the bonded host (its CCCD state)
-    uint8_t mode_on, pair_on;      // chord state
-    uint32_t mode_t0, pair_t0;
+    uint8_t mode_on, pair_on, dfu_on;   // chord state
+    uint32_t mode_t0, pair_t0, dfu_t0;
     uint8_t led_state, led_color, led_blinks;
     uint16_t led_orig[3];
     uint32_t led_t0;
@@ -155,11 +164,11 @@ static void flash_step(void) {
     }
 }
 
-// ---- bond record: page 0xFD000, 32 words
+// ---- bond record: page 0xF7000, 32 words
 // [0] magic  [1] checksum of words 2..31  [2..8] our encryption key (LTK, EDIV, RAND, 28 B)
 // [9] length of the system attributes (low 16 bits)  [10..31] system attributes = the host's CCCD state, so reports
 // flow right after a reconnect without the host subscribing again.
-#define BOND_ADDR 0xFD000u
+#define BOND_ADDR 0xF7000u
 #define BOND_MAGIC 0xB0DD0001u
 static uint32_t rec_sum(const uint32_t *w, int n) { uint32_t a = 0x5A5A1234; while (n--) a = (a << 1 | a >> 31) ^ *w++; return a; }
 static void bond_load(void) {
@@ -191,9 +200,9 @@ static void sa_capture(uint16_t conn) {
     }
 }
 
-// ---- config record: page 0xFE000, 4 words: [0] magic [1] mode [2] ~mode [3] pairing generation
+// ---- config record: page 0xF6000, 4 words: [0] magic [1] mode [2] ~mode [3] pairing generation
 // Read by the boot stub in mk_ble.py (mode) and by blehid_init (generation -> BLE address).
-#define CFG_ADDR 0xFE000u
+#define CFG_ADDR 0xF6000u
 #define CFG_MAGIC 0xC0DE0001u
 #define MODE_BLE 1
 #define MODE_RF 2
@@ -235,6 +244,19 @@ static void pair_reset(void) {
     S.reset_after_flash = 1;
     flash_request(CFG_ADDR, cfg, 4);
 }
+// DFU chord (both modes): mark GPREGRET = 0xB1 and reboot. The Nordic bootloader (fw/bootloader) sees the mark at boot,
+// clears it and stays in DFU mode, advertising for an update. Without the bootloader the mark is ignored (the stock code
+// never reads GPREGRET) and the mouse simply reboots. With the SoftDevice on, POWER belongs to it: use its API.
+static void dfu_reboot(void) {
+    if (SD_FLAG) {
+        sd_power_gpregret_clr(0, 0xFF);
+        sd_power_gpregret_set(0, BOOTLOADER_DFU_START);
+        leave_link();
+    } else {
+        POWER_GPREGRET = BOOTLOADER_DFU_START;
+    }
+    sys_reset();
+}
 // 1 when all buttons of the masks are held for CHORD_TICKS (fires once per hold)
 static int chord_held(uint32_t p0, uint32_t p1, uint8_t *on, uint32_t *t0) {
     int down = (~GPIO_P0_IN & p0) == p0 && (~GPIO_P1_IN & p1) == p1;
@@ -247,7 +269,8 @@ static int chord_held(uint32_t p0, uint32_t p1, uint8_t *on, uint32_t *t0) {
 static void chords_poll(void) {
     if (S.fl.state >= 1 && S.fl.state <= 3) return;   // a record write (and maybe a reboot) is already under way
     if (chord_held(MODE_CHORD_P0, MODE_CHORD_P1, &S.mode_on, &S.mode_t0)) { mode_switch(); return; }
-    if (SD_FLAG && chord_held(0, PAIR_CHORD_P1, &S.pair_on, &S.pair_t0)) { led_start(5, 3); pair_reset(); }
+    if (SD_FLAG && chord_held(0, PAIR_CHORD_P1, &S.pair_on, &S.pair_t0)) { led_start(5, 3); pair_reset(); return; }
+    if (chord_held(DFU_CHORD_P0, DFU_CHORD_P1, &S.dfu_on, &S.dfu_t0)) dfu_reboot();
 }
 
 static void logev(uint32_t id) { uint32_t n = LOG[2]++; LOG[3 + (n & 15)] = id; }
